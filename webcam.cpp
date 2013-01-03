@@ -8,7 +8,7 @@
 
 #define EXPECTEDFPS	30
 
-#define THRESHOLD	0
+#define THRESHOLD	250
 #define COLOUR		255
 
 #define USECSPERSEC	1000000
@@ -20,7 +20,7 @@
 #define HISTSIZE	26			// (256/10 + 1)
 #define SHOWHIST	0
 
-#define USEOPENOP	1
+#define USEOPENOP	0
 #define MORPHSIZE	4
 #define OPENOP		2
 
@@ -107,12 +107,12 @@ int main()
         CV_RGB(255,0,0),
         CV_RGB(255,0,255)
 	};
-    cascade.load("./haarcascade_frontalface_default.xml");
+    cascade.load("cascades/haarcascade_frontalface_default.xml");
     vector<KeyPoint> keyPoints;
     
 	// parameters to detect blobs of pupils
 	SimpleBlobDetector::Params params;
-	params.minDistBetweenBlobs = 100.0f;
+	params.minDistBetweenBlobs = 75.0f;
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
 	params.filterByColor = false;
@@ -120,6 +120,8 @@ int main()
 	params.filterByArea = true;
 	params.minArea = 50.0f;
 	params.maxArea = 200.0f;
+	params.minCircularity = 0.5f;
+	params.maxCircularity = 1.0f;
 	
 	Ptr<FeatureDetector> blob_detector = new 
 		SimpleBlobDetector(params);
@@ -231,11 +233,11 @@ int main()
 			
 			GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
 			equalizeHist(diff_img, diff_img);
-			threshold(diff_img, diff_img,250,255,CV_THRESH_BINARY);
+			threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
 			blob_detector->detect(diff_img, keypoints);
 			
 			drawKeypoints(currframe_mat,keypoints,currframe_mat,colors[0]);
-			equalizeHist( currframe_gray, currframe_gray );
+			//equalizeHist( currframe_gray, currframe_gray );
 			cascade.detectMultiScale( resized_frame, faces,
 		    1.1, 2, 0
 		    //|CV_HAAR_FIND_BIGGEST_OBJECT
@@ -244,7 +246,7 @@ int main()
 		    ,
 		    Size(30, 30) );
 		    
-		    if(keypoints.size() > 0)
+			if(keypoints.size() > 0)
 		    {
 				for( i = 0; i < faces.size(); i++ )
 				{
@@ -339,6 +341,11 @@ int main()
 		if ( (keyVal) == 27 )
 		{
 			if (DEBUGON) printf("time elapsed %f usecs. wait time = %d msecs\n", time_elapsed, wait_time);
+		}
+
+		else if ( (keyVal) == 't' )
+		{
+			flip(arduino_state);	
 		}
 
 		else if ( (keyVal) == 'u' )
