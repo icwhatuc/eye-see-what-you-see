@@ -35,6 +35,8 @@
 
 #define RESIZEFCTR	6
 
+#define DEBUGON 1 // boolean to turn on/off debug printf statements
+
 using namespace cv;
 
 void highlightPupils(Mat &img)
@@ -100,12 +102,12 @@ int main()
 	time_t t;
 	struct tm * now;
 	
-	printf("point%d\n", debug++);//0
+	if (DEBUGON) printf("point%d\n", debug++);//0
 	CvCapture *capture = cvCaptureFromCAM( CV_CAP_ANY );
 	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, 1920);
 	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, 1080);
 	//cvSetCaptureProperty(capture, CV_CAP_PROP_FPS, 30);
-	printf("point%d\n", debug++);//1	
+	if (DEBUGON) printf("point%d\n", debug++);//1	
 	IplImage *prevframe, *currframe;
 	
 	vector<Rect> faces;
@@ -144,9 +146,6 @@ int main()
 	std::ofstream arduino("/dev/ttyUSB0");
 
 	VideoWriter *record; 
-
-	//cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, 640.0);
-	//cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, 480.0);
 
 	//double fps = cvGetCaptureProperty(capture, CV_CAP_PROP_FPS);
 	//double width = cvGetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH);
