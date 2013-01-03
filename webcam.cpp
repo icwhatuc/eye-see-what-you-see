@@ -35,23 +35,9 @@
 
 #define RESIZEFCTR	6
 
-using namespace cv;
+#define DEBUGON 1 // boolean to turn on/off debug printf statements
 
-void highlightPupils(Mat &img)
-{
-	int i, j;
-	Mat img_copy = img.clone();
-	
-	for(i = 0; i < img_copy.rows; i++)
-	{
-		for(j = 0; j < img_copy.cols; j++)
-		{
-			img.at<Vec3b>(i,j)[0];
-		}
-	}
-	
-	img_copy.release();	
-}
+using namespace cv;
 
 void calcplothist(Mat &img)
 {
@@ -84,7 +70,7 @@ int isInRect(Point2f &pt, Rect &r)
 	if(pt.x < (r.x + r.width) && pt.x > r.x
 		&& pt.y < (r.y + r.height) && pt.y > r.y)
 		return 1;
-	
+
 	return 0;
 }
 
@@ -100,12 +86,13 @@ int main()
 	time_t t;
 	struct tm * now;
 	
-	printf("point%d\n", debug++);//0
+	if (DEBUGON) printf("point%d\n", debug++);//0
 	CvCapture *capture = cvCaptureFromCAM( CV_CAP_ANY );
 	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, 1920);
 	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, 1080);
+	// the fps currently doesn't work
 	//cvSetCaptureProperty(capture, CV_CAP_PROP_FPS, 30);
-	printf("point%d\n", debug++);//1	
+	if (DEBUGON) printf("point%d\n", debug++);//1	
 	IplImage *prevframe, *currframe;
 	
 	vector<Rect> faces;
@@ -120,7 +107,8 @@ int main()
         CV_RGB(255,0,255)} ;
     cascade.load("./haarcascade_frontalface_default.xml");
     vector<KeyPoint> keyPoints;
-        
+    
+	// parameters to detect blobs of pupils
 	SimpleBlobDetector::Params params;
 	params.minDistBetweenBlobs = 100.0f;
 	params.filterByInertia = false;
@@ -145,15 +133,11 @@ int main()
 
 	VideoWriter *record; 
 
-	//cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, 640.0);
-	//cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, 480.0);
+	double fps = cvGetCaptureProperty(capture, CV_CAP_PROP_FPS);
+	double width = cvGetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH);
+	double height = cvGetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT);
 
-	//double fps = cvGetCaptureProperty(capture, CV_CAP_PROP_FPS);
-	//double width = cvGetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH);
-	//double height = cvGetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT);
-
-	//printf("fps = %f, height = %f, width = %f\n", fps, height, width);
-
+	printf("fps = %f, height = %f, width = %f\n", fps, height, width);
 
 	if ( !capture )
 	{
@@ -162,7 +146,7 @@ int main()
 		return -1;
 	}
 
-	printf("point%d\n", debug++);//2
+	if (DEBUGON) printf("point%d\n", debug++);//2
 
 	/* Create windows in which the captured images will be presented */
 	cvNamedWindow( "difference", CV_WINDOW_NORMAL );
@@ -176,7 +160,9 @@ int main()
 		cvNamedWindow( "currframe_gray", CV_WINDOW_NORMAL );
 	}
 	if(SHOWHIST)
+	{
 		cvNamedWindow("diffimgHist", CV_WINDOW_NORMAL);
+	}
 	if(USEOPENOP)
 	{
 		cvNamedWindow("morphopendiff", CV_WINDOW_NORMAL);
@@ -208,9 +194,6 @@ int main()
 		//imshow("prevframe_mat", prevframe_mat);
 		//imshow("currframe_mat", currframe_mat);
 		
-		
-		
-
 		cvtColor(prevframe_mat, prevframe_gray, CV_BGR2GRAY );
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
@@ -223,6 +206,8 @@ int main()
 			absdiff(prevframe_gray, currframe_gray, diff_img);
 			
 			/*
+			 * MIHIR - do we need this?
+			 *
 			RNG rng(12345);
 			vector<vector<Point> > contours;
 			vector<Vec4i> hierarchy;
@@ -235,7 +220,7 @@ int main()
 				drawContours( diff_img, contours, i, color, 2, 8, hierarchy, 0, Point() );
 			}
 			*/
-			
+
 			if(USEOPENOP && i++%(EXPECTEDFPS*THRESHREFRESHRATE) == 0) // recalculate threshold based on refresh rate
 			{
 				minMaxLoc(diff_img, &min, &max, &minloc, &maxloc);
@@ -326,26 +311,17 @@ int main()
 			}
 		//}
 		
-
-		
-
-
-			
 		//imshow("coloreddiff", colored_diff_img);
 		cvCopy(currframe, prevframe);
 
 		//makepicture(prevframe);
 		//cvCvtColor(prevframe, mprevframe, CV_BGR2prevframe_gray);
 
-		
 
-		/* save a 1000 frames
-		if(i < 1000)
-		{
-			sprintf(filename, "temp/temp_%05d.jpg", i++);
-			cvSaveImage(filename, currframe);
-			//fprintf(stderr, "saved currframe %d as %s\n", i, filename);
-		}*/
+		// save frames
+		// sprintf(filename, "temp_%05d.jpg", i++);
+	    // cvSaveImage(filename, currframe);
+		// fprintf(stderr, "saved currframe %d as %s\n", i, filename);
 		
 		// Do not release the prevframe_mat!
 		//If ESC key pressed, Key=0x10001B under OpenCV 0.9.7(linux version),
@@ -358,17 +334,21 @@ int main()
 		
 		int wait_time = time_elapsed-EXPCTDFTM < 0?(EXPCTDFTM-time_elapsed)/USECSPERMSEC:1;
 		if(wait_time == 0)
+		{
 			wait_time = 1;
-		
+		}
+
 		int keyVal = cvWaitKey(wait_time) & 255;
 
 		if ( (keyVal) == 27 )
-			printf("time elapsed %f usecs. wait time = %d msecs\n", time_elapsed, wait_time);
-		
+		{
+			if (DEBUGON) printf("time elapsed %f usecs. wait time = %d msecs\n", time_elapsed, wait_time);
+		}
+
 		else if ( (keyVal) == 'u' )
 		{
 			thresh_cut += .05;
-			printf("thresh_cut value updated to %f\n", thresh_cut);
+			if (DEBUGON) printf("thresh_cut value updated to %f\n", thresh_cut);
 			minMaxLoc(diff_img, &min, &max, &minloc, &maxloc);
 			adapt_thresh = (max - min)*thresh_cut + min;
 		}
@@ -376,7 +356,7 @@ int main()
 		else if ( (keyVal) == 'd' )
 		{
 			thresh_cut -= .05;
-			printf("thresh_cut value updated to %f\n", thresh_cut);
+			if (DEBUGON) printf("thresh_cut value updated to %f\n", thresh_cut);
 			minMaxLoc(diff_img, &min, &max, &minloc, &maxloc);
 			adapt_thresh = (max - min)*thresh_cut + min;
 		}
@@ -386,12 +366,12 @@ int main()
 			imwrite("diff_img.jpg", diff_img);
 		}
 		
-		else if( (keyVal) == 32)
+		else if( (keyVal) == 32) // spacebar
 		{
 			if (captureFlag==false)
 			{
 				captureFlag=true;
-				printf("video is now on\n");
+				if (DEBUGON) printf("video is now on\n");
 				record = new VideoWriter("ICwhatUCVideo.avi", CV_FOURCC('M','J','P','G'), 30, diff_img.size(), true);
 				if( !record->isOpened() ) {
 					printf("VideoWriter failed to open!\n");
@@ -402,7 +382,7 @@ int main()
 			else if (captureFlag==true)
 			{
 				captureFlag=false;
-				printf("video is now off\n");
+				if (DEBUGON) printf("video is now off\n");
 			}
 		}
 		
@@ -438,9 +418,7 @@ int main()
 		// record video
 		if (captureFlag == true)
 		{
-			
-			
-			printf("Recording frame\n");
+			if (DEBUGON) printf("Recording frame\n");
 			Mat diff_img_color;
 			cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
 			(*record) << diff_img_color; 
