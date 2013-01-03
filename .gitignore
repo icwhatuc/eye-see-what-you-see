@@ -1,6 +1,12 @@
+webcam
 *.o
 *.swp
 *.swo
 *~
-webcam
+*.avi
+*.png
+*.jpg
+*.jpeg
+*.ogv
+snapshots/
 

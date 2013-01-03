@@ -25,7 +25,7 @@
 #define OPENOP		2
 
 #define flip(x)		((x == '0')?x='1':x='0')
-#define isOn(x)		((x == '1')?1:0)	// currently, when off -> bright pupil image
+#define isOn(x)		(x == '1') // currently, when off -> bright pupil image
 
 #define THRESHREFRESHRATE	5		// seconds
 #define ADPTTHRSCUT		(0.75)
@@ -97,14 +97,16 @@ int main()
 	
 	vector<Rect> faces;
 	CascadeClassifier cascade;
-	const static Scalar colors[] =  { CV_RGB(0,0,255),
+	const static Scalar colors[] =  { 
+		CV_RGB(0,0,255),
         CV_RGB(0,128,255),
         CV_RGB(0,255,255),
         CV_RGB(0,255,0),
         CV_RGB(255,128,0),
         CV_RGB(255,255,0),
         CV_RGB(255,0,0),
-        CV_RGB(255,0,255)} ;
+        CV_RGB(255,0,255)
+	};
     cascade.load("./haarcascade_frontalface_default.xml");
     vector<KeyPoint> keyPoints;
     
@@ -139,9 +141,9 @@ int main()
 
 	printf("fps = %f, height = %f, width = %f\n", fps, height, width);
 
-	if ( !capture )
+	if (!capture)
 	{
-		fprintf( stderr, "ERROR: capture is NULL \n" );
+		fprintf(stderr, "ERROR: capture is NULL \n");
 		getchar();
 		return -1;
 	}
@@ -173,6 +175,9 @@ int main()
 	// Show the image captured from the camera in the window and repeat
 	currframe = cvQueryFrame(capture);
 	prevframe = cvCloneImage(currframe);
+	prevframe_mat = prevframe;
+	cvtColor(prevframe_mat, prevframe_gray, CV_BGR2GRAY );
+
 	printf("width = %d and height = %d\n", currframe->width, currframe->height);
 	//cvResizeWindow("currframe_mat", 640, 480);
 
@@ -183,18 +188,9 @@ int main()
 		arduino.flush();
 		stc = cvGetTickCount();
 		
-		//for(j = 0; j < delay; j++);
 		currframe = cvQueryFrame(capture);
-		
-		prevframe_mat = prevframe;
 		currframe_mat = currframe;
-
-		//colored_diff_img = prevframe_mat - currframe_mat;
-
-		//imshow("prevframe_mat", prevframe_mat);
-		//imshow("currframe_mat", currframe_mat);
 		
-		cvtColor(prevframe_mat, prevframe_gray, CV_BGR2GRAY );
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
 		//if(i++%2) {
@@ -312,7 +308,7 @@ int main()
 		//}
 		
 		//imshow("coloreddiff", colored_diff_img);
-		cvCopy(currframe, prevframe);
+		std::swap(prevframe_gray,currframe_gray);
 
 		//makepicture(prevframe);
 		//cvCvtColor(prevframe, mprevframe, CV_BGR2prevframe_gray);
@@ -432,3 +428,4 @@ int main()
 	cvDestroyWindow( "mywindow" );
 	return 0;
 }
+
