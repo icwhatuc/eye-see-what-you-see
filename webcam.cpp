@@ -5,15 +5,16 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <ctime>
 
 #define EXPECTEDFPS	30
 
 #define THRESHOLD	250
 #define COLOUR		255
 
-#define USECSPERSEC	1000000
+#define USECSPERSEC		1000000
 #define USECSPERMSEC	1000
-#define EXPCTDFTM	33333		// @ 20 fps -> 50000 microsecond between each frame
+#define EXPCTDFTM		33333		// @ 20 fps -> 50000 microsecond between each frame
 
 #define SHOWPREVCURR	0
 
@@ -36,6 +37,12 @@
 #define RESIZEFCTR	6
 
 #define DEBUGON 1 // boolean to turn on/off debug printf statements
+
+#define TIMGW		75		// width of training images
+#define TIMGH		75		// height of training images
+
+#define CAMWIDTH	1920
+#define CAMHEIGHT	1080
 
 using namespace cv;
 
@@ -76,20 +83,24 @@ int isInRect(Point2f &pt, Rect &r)
 
 int main()
 {
+	short recordcandidates = 0;
 	char arduino_state = '0', filename[256];
-	int i = 0, j, delay = 100000000, debug = 0, thresh = 100;
+	int i = 0, j = 0, delay = 100000000, debug = 0, thresh = 100, framecount = 1;
 	long stc, etc;
 	
 	double min, max, adapt_thresh, opened_adapt_thresh, thresh_cut = ADPTTHRSCUT, time_elapsed;
 	Point minloc, maxloc;	
 	
-	time_t t;
-	struct tm * now;
+	time_t t, currrunstamp = time(0);
+	struct tm * now, *currrunstamp_tm = localtime(&currrunstamp);
+	
+	currrunstamp_tm->tm_year += 1900;
+	currrunstamp_tm->tm_mon += 1;
 	
 	if (DEBUGON) printf("point%d\n", debug++);//0
 	CvCapture *capture = cvCaptureFromCAM( CV_CAP_ANY );
-	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, 1920);
-	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, 1080);
+	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, CAMWIDTH);
+	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, CAMHEIGHT);
 	// the fps currently doesn't work
 	//cvSetCaptureProperty(capture, CV_CAP_PROP_FPS, 30);
 	if (DEBUGON) printf("point%d\n", debug++);//1	
@@ -181,7 +192,7 @@ int main()
 	cvtColor(prevframe_mat, prevframe_gray, CV_BGR2GRAY );
 
 	printf("width = %d and height = %d\n", currframe->width, currframe->height);
-	//cvResizeWindow("currframe_mat", 640, 480);
+	cvResizeWindow("currframe_mat", 1920, 1080);
 
 	printf("point%d\n", debug++);//4
 	while (1)
@@ -234,6 +245,14 @@ int main()
 			GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
 			equalizeHist(diff_img, diff_img);
 			threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
+
+/*
+			int dilation_size = 3;
+			Mat element = getStructuringElement( MORPH_ELLIPSE,
+				Size( 2*dilation_size + 1, 2*dilation_size+1 ),
+				Point( dilation_size, dilation_size ) );
+			erode(diff_img, diff_img, element);
+*/
 			blob_detector->detect(diff_img, keypoints);
 			
 			drawKeypoints(currframe_mat,keypoints,currframe_mat,colors[0]);
@@ -245,6 +264,18 @@ int main()
 		    |CV_HAAR_SCALE_IMAGE
 		    ,
 		    Size(30, 30) );
+		    
+		    if(recordcandidates)
+		    {	    
+				sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d.jpg", 
+									currrunstamp_tm->tm_mon, 
+									currrunstamp_tm->tm_mday,
+									currrunstamp_tm->tm_hour,
+									currrunstamp_tm->tm_min,
+									currrunstamp_tm->tm_sec,
+									framecount);
+				imwrite(filename, currframe_mat);
+		    }
 		    
 			if(keypoints.size() > 0)
 		    {
@@ -259,14 +290,60 @@ int main()
 					faces[i].width*=RESIZEFCTR;
 					faces[i].height*=RESIZEFCTR;
 					
+					faces[i].y += (height/50);
+					//faces[i].height -= (height/10);
+					faces[i].height = faces[i].height*1/2;
+					
+					int oldwidth = faces[i].width;
+					
+					faces[i].width = faces[i].width*5/6;
+					faces[i].x += ((oldwidth - faces[i].width)/2);
+					
 					rectangle(currframe_mat, faces[i], color);
 					//Mat roi = diff_img(faces[i]);
 					
-					for (int j = 0; j < keypoints.size(); j++) {
+					for (int j = 0; j < keypoints.size(); j++)
+					{
 						//std::cout << keypoints[i].pt.x << ", " << keypoints[i].pt.y << std::endl;
 						if(isInRect(keypoints[j].pt, faces[i]))
 							circle(currframe_mat, keypoints[j].pt, 15, color, 3);
+						
+						if(recordcandidates)
+						{
+							int x, y;
+							x = (int)(keypoints[j].pt.x - TIMGW/2);
+							y = (int)(keypoints[j].pt.y - TIMGH/2);
+							
+							if(x < 0 || y < 0 ||
+								x + TIMGW >= CAMWIDTH ||
+								y + TIMGH >= CAMHEIGHT)
+								continue;
+							
+							Rect candidateRegion(x, y, TIMGW, TIMGH);
+						
+							sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d.jpg", 
+									currrunstamp_tm->tm_mon, 
+									currrunstamp_tm->tm_mday,
+									currrunstamp_tm->tm_hour,
+									currrunstamp_tm->tm_min,
+									currrunstamp_tm->tm_sec,
+									framecount,
+									j);
+							if(arduino_state != '0')
+							{
+								Mat candidateimg = currframe_gray(candidateRegion);
+								imwrite(filename, candidateimg);						
+							}
+							else
+							{
+								Mat candidateimg = prevframe_gray(candidateRegion);
+								imwrite(filename, candidateimg);
+							}
+						}
 					}
+					
+					if(recordcandidates)
+						recordcandidates = 0;
 					
 					/*Point maxLoc;
 					double maxval;
@@ -281,6 +358,24 @@ int main()
 					*/
 				}
 			}
+			j++;
+			/* testing synchronization and checking bright and dark images
+			
+			if(j < 1000)
+			{
+				char filename[100];
+				if(arduino_state == '0')
+				{
+					sprintf(filename, "brightimgs/brightimg%d.jpg", j/2);
+					imwrite(filename, currframe_mat);
+				}
+				else
+				{
+					sprintf(filename, "darkimgs/darkimg%d.jpg", j/2);
+					imwrite(filename, currframe_mat);
+				}
+				j++;
+			}*/
 			
 			//equalizeHist(diff_img,diff_img);
 			//threshold(diff_img, diff_img, (int)adapt_thresh, COLOUR, THRESH_BINARY);
@@ -312,18 +407,6 @@ int main()
 		//imshow("coloreddiff", colored_diff_img);
 		std::swap(prevframe_gray,currframe_gray);
 
-		//makepicture(prevframe);
-		//cvCvtColor(prevframe, mprevframe, CV_BGR2prevframe_gray);
-
-
-		// save frames
-		// sprintf(filename, "temp_%05d.jpg", i++);
-	    // cvSaveImage(filename, currframe);
-		// fprintf(stderr, "saved currframe %d as %s\n", i, filename);
-		
-		// Do not release the prevframe_mat!
-		//If ESC key pressed, Key=0x10001B under OpenCV 0.9.7(linux version),
-		//remove higher bits using AND operator
 		etc = cvGetTickCount();
 		time_elapsed = (etc - stc)/cvGetTickFrequency();
 		
@@ -393,6 +476,10 @@ int main()
 		{
 			break; // break out of loop to stop program
 		}
+		else if ( (keyVal) == 'c' )
+		{
+			recordcandidates = 1;
+		}
 		
 		/* image snapshot options */
 		
@@ -427,6 +514,7 @@ int main()
 			(*record) << diff_img_color; 
 		}
 		
+		framecount++;
 		flip(arduino_state);	
 		
 	}
