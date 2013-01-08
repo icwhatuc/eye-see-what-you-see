@@ -11,6 +11,7 @@
 #include <vector>
 
 int count_files(DIR *dp);
+float predict_eye(CvSVM &svm, char *img_path);
 
 using namespace cv;
 int main() {
@@ -81,7 +82,21 @@ int main() {
 	// Print out the filenames that correspond to the support vectors
 	int num_supports = svm.get_support_vector_count();
 	for (int i = 0; i < num_supports; i++) {
-		std::cout << filenames[*svm.get_support_vector(i)] << std::endl;
+		//std::cout << filenames[*svm.get_support_vector(i)] << std::endl;
+	}
+
+	rewinddir(dp1);
+	while (ep = readdir(dp1)) {
+		//if (!imgname.compare(".") && !imgname.compare("..")) {
+		imgname = ep->d_name;
+		std::cout << imgname << std::endl;
+		if (!imgname.compare(".") || !imgname.compare("..")) 
+			continue;
+
+		std::string tmp = dirname1+imgname;
+		const char *param = tmp.c_str();
+		std::cout << predict_eye(svm, (char *)param) << std::endl;
+		//std::cout << predict_eye(svm, dirname1+imgname) << std::endl;
 	}
 }
 
@@ -99,4 +114,12 @@ int count_files(DIR *dp) {
 	rewinddir(dp);
 	return filecount;
 }
+
+float predict_eye(CvSVM &svm, char *img_path) {
+	Mat img_mat = imread(img_path,0);
+	equalizeHist(img_mat,img_mat);
+	Mat img_mat_1d(1,img_mat.size().area(),CV_32FC1);
+	return svm.predict(img_mat_1d);
+}
+
 
