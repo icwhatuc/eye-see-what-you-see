@@ -10,6 +10,9 @@
 #include <iostream>
 #include <vector>
 
+#define EYECLASS	1
+#define NONEYECLASS	-1
+
 int count_files(DIR *dp);
 float predict_eye(CvSVM &svm, char *img_path);
 
@@ -64,16 +67,18 @@ int main() {
 				svm_mat.at<float>(filenum,ii++) = img_mat.at<uchar>(i,j);
 			}
 		}
-		labels.at<float>(filenum) = strcmp(dirname,dirname1) ? -1 : 1;
+		labels.at<float>(filenum) = strcmp(dirname,dirname1) ? NONEYECLASS : EYECLASS;
 		filenum++;
 	}
+	
+	std::cout << labels << std::endl;
 
 	// Initialize the SVM with parameters
 	CvSVMParams params;
 	params.svm_type    = CvSVM::C_SVC;
 	params.kernel_type = CvSVM::RBF;
 	params.gamma = 3;
-	params.term_crit   = cvTermCriteria(CV_TERMCRIT_ITER, 100, 1e-6);
+	params.term_crit   = cvTermCriteria(CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 15000, 1e-6);
 
 	// Train the SVM
 	CvSVM svm;
@@ -85,9 +90,21 @@ int main() {
 		//std::cout << filenames[*svm.get_support_vector(i)] << std::endl;
 	}
 
-	currdp = dp2;
-	currdirname = dirname2;
-	int desiredresult = -1, total = 0, correct = 0;
+#define DESIREDTEST		0
+	
+	int desiredresult, total, correct;
+	if(DESIREDTEST)
+	{
+		currdp = dp1;
+		currdirname = dirname1;
+		desiredresult = EYECLASS; total = 0; correct = 0;
+	}
+	else
+	{
+		currdp = dp2;
+		currdirname = dirname2;
+		desiredresult = NONEYECLASS; total = 0; correct = 0;
+	}
 	
 	rewinddir(currdp);
 	while (ep = readdir(currdp)) {
@@ -106,7 +123,7 @@ int main() {
 			correct++;
 		
 		total++;
-		//std::cout << predict_eye(svm, (char *)param) << std::endl;
+		std::cout << predict_eye(svm, (char *)param) << std::endl;
 		//std::cout << predict_eye(svm, dirname1+imgname) << std::endl;
 	}
 	
@@ -132,6 +149,15 @@ float predict_eye(CvSVM &svm, char *img_path) {
 	Mat img_mat = imread(img_path,0);
 	equalizeHist(img_mat,img_mat);
 	Mat img_mat_1d(1,img_mat.size().area(),CV_32FC1);
+	
+	int ii = 0;
+	
+	for (int i = 0; i<img_mat.rows; i++) {
+		for (int j = 0; j < img_mat.cols; j++) {
+			img_mat_1d.at<float>(ii++) = img_mat.at<uchar>(i,j);
+		}
+	}
+	
 	return svm.predict(img_mat_1d);
 }
 
