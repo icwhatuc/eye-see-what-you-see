@@ -257,7 +257,7 @@ int main()
 			
 			drawKeypoints(currframe_mat,keypoints,currframe_mat,colors[0]);
 			//equalizeHist( currframe_gray, currframe_gray );
-			cascade.detectMultiScale( resized_frame, faces,
+			/*cascade.detectMultiScale( resized_frame, faces,
 		    1.1, 2, 0
 		    //|CV_HAAR_FIND_BIGGEST_OBJECT
 		    //|CV_HAAR_DO_ROUGH_SEARCH
@@ -302,49 +302,6 @@ int main()
 					rectangle(currframe_mat, faces[i], color);
 					//Mat roi = diff_img(faces[i]);
 					
-					for (int j = 0; j < keypoints.size(); j++)
-					{
-						//std::cout << keypoints[i].pt.x << ", " << keypoints[i].pt.y << std::endl;
-						if(isInRect(keypoints[j].pt, faces[i]))
-							circle(currframe_mat, keypoints[j].pt, 15, color, 3);
-						
-						if(recordcandidates)
-						{
-							int x, y;
-							x = (int)(keypoints[j].pt.x - TIMGW/2);
-							y = (int)(keypoints[j].pt.y - TIMGH/2);
-							
-							if(x < 0 || y < 0 ||
-								x + TIMGW >= CAMWIDTH ||
-								y + TIMGH >= CAMHEIGHT)
-								continue;
-							
-							Rect candidateRegion(x, y, TIMGW, TIMGH);
-						
-							sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d.jpg", 
-									currrunstamp_tm->tm_mon, 
-									currrunstamp_tm->tm_mday,
-									currrunstamp_tm->tm_hour,
-									currrunstamp_tm->tm_min,
-									currrunstamp_tm->tm_sec,
-									framecount,
-									j);
-							if(arduino_state != '0')
-							{
-								Mat candidateimg = currframe_gray(candidateRegion);
-								imwrite(filename, candidateimg);						
-							}
-							else
-							{
-								Mat candidateimg = prevframe_gray(candidateRegion);
-								imwrite(filename, candidateimg);
-							}
-						}
-					}
-					
-					if(recordcandidates)
-						recordcandidates = 0;
-					
 					/*Point maxLoc;
 					double maxval;
 				
@@ -355,9 +312,53 @@ int main()
 					maxLoc.x += faces[i].x;
 					maxLoc.y += faces[i].y;
 					circle(currframe_mat, maxLoc, 5, color, 3);
-					*/
+					
 				}
+			}*/
+			if(recordcandidates)
+			{
+				for (int j = 0; j < keypoints.size(); j++)
+				{
+				//std::cout << keypoints[i].pt.x << ", " << keypoints[i].pt.y << std::endl;
+				//if(isInRect(keypoints[j].pt, faces[i]))
+					//circle(currframe_mat, keypoints[j].pt, 15, color, 3);
+				
+				
+					int x, y;
+					x = (int)(keypoints[j].pt.x - TIMGW/2);
+					y = (int)(keypoints[j].pt.y - TIMGH/2);
+					
+					if(x < 0 || y < 0 ||
+						x + TIMGW >= CAMWIDTH ||
+						y + TIMGH >= CAMHEIGHT)
+						continue;
+					
+					Rect candidateRegion(x, y, TIMGW, TIMGH);
+				
+					sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d.jpg", 
+							currrunstamp_tm->tm_mon, 
+							currrunstamp_tm->tm_mday,
+							currrunstamp_tm->tm_hour,
+							currrunstamp_tm->tm_min,
+							currrunstamp_tm->tm_sec,
+							framecount,
+							j);
+					if(arduino_state != '0')
+					{
+						Mat candidateimg = currframe_gray(candidateRegion);
+						imwrite(filename, candidateimg);						
+					}
+					else
+					{
+						Mat candidateimg = prevframe_gray(candidateRegion);
+						imwrite(filename, candidateimg);
+					}
+				}
+				
+				recordcandidates = 0;
 			}
+			
+			
 			j++;
 			/* testing synchronization and checking bright and dark images
 			

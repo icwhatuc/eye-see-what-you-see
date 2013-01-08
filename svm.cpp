@@ -15,12 +15,12 @@ float predict_eye(CvSVM &svm, char *img_path);
 
 using namespace cv;
 int main() {
-	DIR *dp1, *dp2;
+	DIR *dp1, *dp2, *currdp;
 	struct dirent *ep;
 	std::string filename;
 
 	char *dirname1 = "./candidates/pos/";
-	char *dirname2 = "./candidates/neg/";
+	char *dirname2 = "./candidates/neg/", *currdirname;
 	dp1 = opendir(dirname1);
 	dp2 = opendir(dirname2);
 
@@ -64,7 +64,7 @@ int main() {
 				svm_mat.at<float>(filenum,ii++) = img_mat.at<uchar>(i,j);
 			}
 		}
-		labels.at<float>(filenum) = (dirname == dirname1) ? 1 : -1;
+		labels.at<float>(filenum) = strcmp(dirname,dirname1) ? -1 : 1;
 		filenum++;
 	}
 
@@ -85,19 +85,32 @@ int main() {
 		//std::cout << filenames[*svm.get_support_vector(i)] << std::endl;
 	}
 
-	rewinddir(dp1);
-	while (ep = readdir(dp1)) {
+	currdp = dp2;
+	currdirname = dirname2;
+	int desiredresult = -1, total = 0, correct = 0;
+	
+	rewinddir(currdp);
+	while (ep = readdir(currdp)) {
 		//if (!imgname.compare(".") && !imgname.compare("..")) {
 		imgname = ep->d_name;
 		std::cout << imgname << std::endl;
 		if (!imgname.compare(".") || !imgname.compare("..")) 
 			continue;
 
-		std::string tmp = dirname1+imgname;
+		std::string tmp = currdirname+imgname;
 		const char *param = tmp.c_str();
-		std::cout << predict_eye(svm, (char *)param) << std::endl;
+		
+		int result = (int)predict_eye(svm, (char *)param);
+		
+		if(result == desiredresult)
+			correct++;
+		
+		total++;
+		//std::cout << predict_eye(svm, (char *)param) << std::endl;
 		//std::cout << predict_eye(svm, dirname1+imgname) << std::endl;
 	}
+	
+	std::cout << "Total: " << total << " & Correct: " << correct << std::endl;
 }
 
 // Count number of files in directory, not including "." or ".."
