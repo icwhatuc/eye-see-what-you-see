@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <ctime>
 
 #define EYECLASS	1
 #define NONEYECLASS	-1
@@ -17,16 +18,19 @@ int count_files(DIR *dp);
 float predict_eye(CvSVM &svm, char *img_path);
 
 using namespace cv;
-int main() {
-	DIR *dp1, *dp2, *currdp;
+int main()
+{
+	DIR *dp1, *dp2, *testdp, *currdp;
 	struct dirent *ep;
 	std::string filename;
 
 	char *dirname1 = "./candidates/pos/";
 	char *dirname2 = "./candidates/neg/", *currdirname;
+	char *testdir  = "./candidates/test/";
 	dp1 = opendir(dirname1);
 	dp2 = opendir(dirname2);
-
+	testdp = opendir(testdir);
+	
 	if (dp1 == NULL) {
 		perror("Couldn't open directory");
 		exit(-1);
@@ -43,11 +47,11 @@ int main() {
 	int imgsize = img.size().area();
 
 	// Count files to get number of rows in SVM input
-	int filecount = count_files(dp1) + count_files(dp2);
+	int filecount = count_files(dp1)*2 /* normal eyes & flipped eyes */ + count_files(dp2);
 	Mat svm_mat(filecount,imgsize,CV_32FC1);
 
 	// Generate the SVM input matrix by reading files
-	Mat img_mat;
+	Mat img_mat, img_mat_flipped;
 	Mat labels(filecount,1,CV_32FC1);
 	int ii, filenum = 0;
 	char *dirname = dirname1;
@@ -67,22 +71,44 @@ int main() {
 				svm_mat.at<float>(filenum,ii++) = img_mat.at<uchar>(i,j);
 			}
 		}
+		
+		if(strcmp(dirname,dirname1) == 0)
+		{
+			labels.at<float>(filenum) = strcmp(dirname,dirname1) ? NONEYECLASS : EYECLASS;
+			flip(img_mat, img_mat_flipped, 1);
+			filenum++;
+			ii = 0;
+		
+			// Copy the pixels from the original image matrix to svm input matrix
+			for (int i = 0; i<img_mat_flipped.rows; i++) {
+				for (int j = 0; j < img_mat_flipped.cols; j++) {
+					svm_mat.at<float>(filenum,ii++) = img_mat_flipped.at<uchar>(i,j);
+				}
+			}
+		}
+		
 		labels.at<float>(filenum) = strcmp(dirname,dirname1) ? NONEYECLASS : EYECLASS;
 		filenum++;
 	}
 	
-	std::cout << labels << std::endl;
+	//std::cout << labels << std::endl;
 
 	// Initialize the SVM with parameters
 	CvSVMParams params;
 	params.svm_type    = CvSVM::C_SVC;
-	params.kernel_type = CvSVM::RBF;
+	params.kernel_type = CvSVM::LINEAR;
 	params.gamma = 3;
 	params.term_crit   = cvTermCriteria(CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 15000, 1e-6);
 
 	// Train the SVM
 	CvSVM svm;
+	clock_t init = clock();
 	svm.train(svm_mat, labels, Mat(), Mat(), params);
+	clock_t final = clock() - init;
+	
+	std::cout << (double)final/(double)CLOCKS_PER_SEC << " secs\n";
+	
+	svm.save("eye_classify.svm");
 
 	// Print out the filenames that correspond to the support vectors
 	int num_supports = svm.get_support_vector_count();
@@ -91,7 +117,7 @@ int main() {
 	}
 
 #define DESIREDTEST		0
-	
+	/*
 	int desiredresult, total, correct;
 	if(DESIREDTEST)
 	{
@@ -110,7 +136,7 @@ int main() {
 	while (ep = readdir(currdp)) {
 		//if (!imgname.compare(".") && !imgname.compare("..")) {
 		imgname = ep->d_name;
-		std::cout << imgname << std::endl;
+		//std::cout << imgname << std::endl;
 		if (!imgname.compare(".") || !imgname.compare("..")) 
 			continue;
 
@@ -123,11 +149,29 @@ int main() {
 			correct++;
 		
 		total++;
-		std::cout << predict_eye(svm, (char *)param) << std::endl;
+		//std::cout << predict_eye(svm, (char *)param) << std::endl;
+		
 		//std::cout << predict_eye(svm, dirname1+imgname) << std::endl;
 	}
 	
 	std::cout << "Total: " << total << " & Correct: " << correct << std::endl;
+	*/
+	
+	while (ep = readdir(testdp)) {
+		//if (!imgname.compare(".") && !imgname.compare("..")) {
+		imgname = ep->d_name;
+		if (!imgname.compare(".") || !imgname.compare("..")) 
+			continue;
+
+		std::string tmp = testdir+imgname;
+		const char *param = tmp.c_str();
+		
+		int result = (int)predict_eye(svm, (char *)param);
+		std::cout << imgname << "\t" << predict_eye(svm, (char *)param) << std::endl;
+		
+		//std::cout << predict_eye(svm, dirname1+imgname) << std::endl;
+	}
+	
 }
 
 // Count number of files in directory, not including "." or ".."

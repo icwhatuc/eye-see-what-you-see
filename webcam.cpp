@@ -6,10 +6,11 @@
 #include <fstream>
 #include <iostream>
 #include <ctime>
+#include <ml.h>
 
 #define EXPECTEDFPS	30
 
-#define THRESHOLD	250
+#define THRESHOLD	245
 #define COLOUR		255
 
 #define USECSPERSEC		1000000
@@ -36,13 +37,16 @@
 
 #define RESIZEFCTR	6
 
-#define DEBUGON 1 // boolean to turn on/off debug printf statements
+#define DEBUGON 	0		// boolean to turn on/off debug printf statements
 
 #define TIMGW		75		// width of training images
 #define TIMGH		75		// height of training images
 
 #define CAMWIDTH	1920
 #define CAMHEIGHT	1080
+
+#define EYECLASS	1
+#define NONEYECLASS	-1
 
 using namespace cv;
 
@@ -81,6 +85,21 @@ int isInRect(Point2f &pt, Rect &r)
 	return 0;
 }
 
+float predict_eye(CvSVM &svm, Mat &img_mat) {
+	equalizeHist(img_mat,img_mat);
+	Mat img_mat_1d(1,img_mat.size().area(),CV_32FC1);
+	
+	int ii = 0;
+	
+	for (int i = 0; i<img_mat.rows; i++) {
+		for (int j = 0; j < img_mat.cols; j++) {
+			img_mat_1d.at<float>(ii++) = img_mat.at<uchar>(i,j);
+		}
+	}
+	
+	return svm.predict(img_mat_1d);
+}
+
 int main()
 {
 	short recordcandidates = 0;
@@ -90,6 +109,9 @@ int main()
 	
 	double min, max, adapt_thresh, opened_adapt_thresh, thresh_cut = ADPTTHRSCUT, time_elapsed;
 	Point minloc, maxloc;	
+	
+	CvSVM svm;
+	svm.load("eye_classify.svm");
 	
 	time_t t, currrunstamp = time(0);
 	struct tm * now, *currrunstamp_tm = localtime(&currrunstamp);
@@ -131,7 +153,7 @@ int main()
 	params.filterByArea = true;
 	params.minArea = 50.0f;
 	params.maxArea = 200.0f;
-	params.minCircularity = 0.5f;
+	params.minCircularity = 0.7f;
 	params.maxCircularity = 1.0f;
 	
 	Ptr<FeatureDetector> blob_detector = new 
@@ -203,6 +225,15 @@ int main()
 		
 		currframe = cvQueryFrame(capture);
 		currframe_mat = currframe;
+		
+		// record video
+		if (captureFlag == true)
+		{
+			if (DEBUGON) printf("Recording frame\n");
+			//Mat diff_img_color;
+			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
+			(*record) << currframe_mat; 
+		}
 		
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
@@ -346,7 +377,7 @@ int main()
 					if(arduino_state != '0')
 					{
 						Mat candidateimg = currframe_gray(candidateRegion);
-						imwrite(filename, candidateimg);						
+						imwrite(filename, candidateimg);
 					}
 					else
 					{
@@ -358,8 +389,33 @@ int main()
 				recordcandidates = 0;
 			}
 			
-			
-			j++;
+			for (int j = 0; j < keypoints.size(); j++)
+			{
+				int x, y;
+				Mat candidateimg;
+				Scalar color = colors[0];
+				
+				x = (int)(keypoints[j].pt.x - TIMGW/2);
+				y = (int)(keypoints[j].pt.y - TIMGH/2);
+				if(x < 0 || y < 0 ||
+					x + TIMGW >= CAMWIDTH ||
+					y + TIMGH >= CAMHEIGHT)
+					continue;
+				
+				Rect candidateRegion(x, y, TIMGW, TIMGH);
+				
+				if(arduino_state != '0')
+					candidateimg = currframe_gray(candidateRegion);
+				else
+					candidateimg = prevframe_gray(candidateRegion);
+				
+				if(predict_eye(svm, candidateimg) == EYECLASS)
+				{
+					circle(currframe_mat, keypoints[j].pt, 5, color, 3);
+				}
+			}
+				
+			//j++;
 			/* testing synchronization and checking bright and dark images
 			
 			if(j < 1000)
@@ -459,7 +515,7 @@ int main()
 			{
 				captureFlag=true;
 				if (DEBUGON) printf("video is now on\n");
-				record = new VideoWriter("ICwhatUCVideo.avi", CV_FOURCC('M','J','P','G'), 30, diff_img.size(), true);
+				record = new VideoWriter("ICwhatUCVideo.avi", CV_FOURCC('M','J','P','G'), 5, diff_img.size(), true);
 				if( !record->isOpened() ) {
 					printf("VideoWriter failed to open!\n");
 				}
@@ -504,15 +560,6 @@ int main()
 				(now->tm_year + 1900), (now->tm_mon + 1), now->tm_mday, 
 				now->tm_hour, now->tm_min, now->tm_sec);
 			imwrite(filename, *ss);
-		}
-		
-		// record video
-		if (captureFlag == true)
-		{
-			if (DEBUGON) printf("Recording frame\n");
-			Mat diff_img_color;
-			cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
-			(*record) << diff_img_color; 
 		}
 		
 		framecount++;
