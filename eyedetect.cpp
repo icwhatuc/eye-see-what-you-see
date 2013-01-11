@@ -42,6 +42,8 @@
 
 #define HISTSIZE	26
 
+#define centerOfRect(R)	(Point(R.x + R.width/2, R.y + R.height/2))
+
 using namespace cv;
 
 int isInRect(Point2f &pt, Rect &r)
@@ -82,6 +84,33 @@ float predict_eye(CvSVM &svm, Mat &img_mat_orig)
     
 	//printf("Elapsed time: %ld milliseconds\n", mtime);
 	return retval;
+}
+
+bool overlap(Rect &region1, Rect &region2)
+{
+	if((region1 & region2).size().area() > 25)
+		return true;
+}
+
+int isKnown(Rect &region, Vector <Rect> &regionlist)
+{
+	int index = -1; /* index @ which there is a region similar to parameter in regionlist */
+	for(index = 0; index < regionlist.size(); index++)
+	{
+		//printf("isKnown: inside loop\n");
+		if(overlap(region, regionlist[index]))
+			break;
+	}
+	
+	//printf("isKnown: retval = %d\n", index);
+	
+	if(index == regionlist.size())
+	{
+		//printf("but returned -1\n");
+		return -1;
+	}
+	
+	return index;
 }
 
 int main(int argc, char *argv[])
@@ -167,6 +196,10 @@ int main(int argc, char *argv[])
 	cvNamedWindow( "backprojection", CV_WINDOW_NORMAL );
 	
 	
+	/* Eye tracking */
+	Vector <Rect> knownEyeRegions;
+	Vector <bool> regionsKnown;
+	
 	// Show the image captured from the camera in the window and repeat
 	currframe = cvQueryFrame(capture);
 	prevframe = cvCloneImage(currframe);
@@ -210,7 +243,7 @@ int main(int argc, char *argv[])
 	
 		calcHist( &diff_copy, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false );
 		calcBackProject ( &diff_copy, 1, 0, hist, backprojection, &histRange );
-		
+		equalizeHist(backprojection, backprojection);
 		imshow("backprojection", backprojection);
 		
 		GaussianBlur( backprojection, backprojection, Size(9,9), 16, 16 );
@@ -228,7 +261,16 @@ int main(int argc, char *argv[])
 		blob_detector->detect(backprojection, keypoints);
 		drawKeypoints(currframe_mat,keypoints,currframe_mat,BLUE);
 		
-		for (int j = 0; j < keypoints.size(); j++)
+		/* clean regionsKnown */
+		//printf("cleaning the regionsKnown information from last frame...\n");
+		int j;
+		for(j = 0; j < regionsKnown.size(); j++)
+		{
+			regionsKnown[j] = false;
+		}
+		
+		//printf("checking out each keyPoint and verifying last known regions...\n");
+		for (j = 0; j < keypoints.size(); j++)
 		{
 			int x, y;
 			Mat candidateimg;
@@ -249,7 +291,38 @@ int main(int argc, char *argv[])
 			
 			if(predict_eye(svm, candidateimg) == EYECLASS)
 			{
+				//printf("call to isKnown\n");
+				int index = isKnown(candidateRegion, knownEyeRegions);
+				//printf("index = %d\n", index);
+				if(index != -1)
+				{
+					regionsKnown[index] = true;
+					knownEyeRegions[index] = candidateRegion;
+				}
+				else
+				{
+					//std::cout << "added region: " << candidateRegion.x << ", " << candidateRegion.y << std::endl;
+					knownEyeRegions.push_back(candidateRegion);
+					regionsKnown.push_back(true);
+				}
+					
 				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
+			}
+		}
+		
+		//printf("filling in missed information...\n");
+		for(j = 0; j < regionsKnown.size(); j++)
+		{
+			if(!regionsKnown[j])
+			{
+				Mat candidateimg;
+				if(arduino_state != '0')
+					candidateimg = currframe_gray(knownEyeRegions[j]);
+				else
+					candidateimg = prevframe_gray(knownEyeRegions[j]);
+				
+				if(predict_eye(svm, candidateimg) == EYECLASS)
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
 			}
 		}
 		
