@@ -47,7 +47,8 @@ int main()
 	int imgsize = img.size().area();
 
 	// Count files to get number of rows in SVM input
-	int filecount = count_files(dp1)*2 /* normal eyes & flipped eyes */ + count_files(dp2);
+	int negcount = count_files(dp2)/5;
+	int filecount = count_files(dp1)*2 /* normal eyes & flipped eyes */ + negcount;
 	Mat svm_mat(filecount,imgsize,CV_32FC1);
 
 	// Generate the SVM input matrix by reading files
@@ -56,7 +57,13 @@ int main()
 	int ii, filenum = 0;
 	char *dirname = dirname1;
 	std::vector<std::string> filenames;
-	while ((ep = readdir(dp1)) || ((dirname = dirname2) && (ep = readdir(dp2)))) {
+	
+	int negcounter = -1;
+	
+	fprintf(stderr, "creating svm_mat...\n");
+	
+	while ((ep = readdir(dp1)) || ((dirname = dirname2) && (ep = readdir(dp2))))
+	{
 		imgname = ep->d_name;
 		if (imgname.compare(".") == 0 || imgname.compare("..") == 0)
 			continue;
@@ -71,11 +78,12 @@ int main()
 				svm_mat.at<float>(filenum,ii++) = img_mat.at<uchar>(i,j);
 			}
 		}
-		
+
 		if(strcmp(dirname,dirname1) == 0)
 		{
 			labels.at<float>(filenum) = strcmp(dirname,dirname1) ? NONEYECLASS : EYECLASS;
 			flip(img_mat, img_mat_flipped, 1);
+			
 			filenum++;
 			ii = 0;
 		
@@ -86,26 +94,41 @@ int main()
 				}
 			}
 		}
+		else if(negcounter == -1)
+		{
+			negcounter = 0;
+			fprintf(stderr, "dealing with the negative set...\n");
+		}
+		else
+		{
+			negcounter++;
+			//fprintf(stderr, "negcount = %d\n", negcounter);
+		}
 		
 		labels.at<float>(filenum) = strcmp(dirname,dirname1) ? NONEYECLASS : EYECLASS;
 		filenum++;
+		if(negcounter == negcount-1)
+			break;
 	}
 	
+	fprintf(stderr, "finished creating the negative set...\n");
 	//std::cout << labels << std::endl;
 
 	// Initialize the SVM with parameters
 	CvSVMParams params;
 	params.svm_type    = CvSVM::C_SVC;
-	params.kernel_type = CvSVM::LINEAR;
+	params.kernel_type = CvSVM::POLY;
 	params.gamma = 3;
 	params.term_crit   = cvTermCriteria(CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 15000, 1e-6);
-
+	params.degree = 2;
+	
+	fprintf(stderr, "training svm...\n");
 	// Train the SVM
 	CvSVM svm;
 	clock_t init = clock();
 	svm.train(svm_mat, labels, Mat(), Mat(), params);
 	clock_t final = clock() - init;
-	
+	fprintf(stderr, "finished training svm...\n");
 	std::cout << (double)final/(double)CLOCKS_PER_SEC << " secs\n";
 	
 	svm.save("eye_classify.svm");
@@ -116,8 +139,8 @@ int main()
 		//std::cout << filenames[*svm.get_support_vector(i)] << std::endl;
 	}
 
-#define DESIREDTEST		0
-	/*
+#define DESIREDTEST		1
+	
 	int desiredresult, total, correct;
 	if(DESIREDTEST)
 	{
@@ -155,7 +178,7 @@ int main()
 	}
 	
 	std::cout << "Total: " << total << " & Correct: " << correct << std::endl;
-	*/
+	
 	
 	while (ep = readdir(testdp)) {
 		//if (!imgname.compare(".") && !imgname.compare("..")) {
