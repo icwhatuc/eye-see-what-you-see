@@ -185,7 +185,7 @@ int main(int argc, char *argv[])
 	/* Eye tracking */
 	std::vector <Rect> knownEyeRegions;
 	std::vector <bool> regionsKnown;
-	
+
 	// Show the image captured from the camera in the window and repeat
 	currframe = cvQueryFrame(capture);
 	prevframe = cvCloneImage(currframe);
@@ -203,6 +203,7 @@ int main(int argc, char *argv[])
 
 	while (1)
 	{
+		std::vector <Rect> drawnRegions;
 		arduino << arduino_state;
 		arduino.flush();
 		stc = cvGetTickCount();
@@ -291,19 +292,24 @@ int main(int argc, char *argv[])
 			{
 				num_eyes++;
 				//printf("call to isKnown\n");
-				int index = isKnown(candidateRegion, knownEyeRegions);
-				//printf("index = %d\n", index);
-				if(index != -1)
+				int index;
+				
+				for(index = 0; index < knownEyeRegions.size(); index++)
 				{
-					regionsKnown[index] = true;
-					knownEyeRegions[index] = candidateRegion;
+					if(isInRect(keypoints[j].pt, knownEyeRegions[index]))
+					{
+						knownEyeRegions[index] = candidateRegion;
+						regionsKnown[index] = true;
+						break;
+					}
 				}
-				else
+
+				if(index == knownEyeRegions.size())
 				{
-					regionsKnown.push_back(true);
 					knownEyeRegions.push_back(candidateRegion);
+					regionsKnown.push_back(true);
 				}
-					
+				
 				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
 			}
 		}
@@ -319,7 +325,8 @@ int main(int argc, char *argv[])
 				else
 					candidateimg = prevframe_gray(knownEyeRegions[j]);
 				
-				if(predict_eye(svm, candidateimg) == EYECLASS) {
+				if(predict_eye(svm, candidateimg) == EYECLASS)
+				{
 					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
 					rectangle(currframe_mat, Point(knownEyeRegions[j].x,knownEyeRegions[j].y), 
 						Point(knownEyeRegions[j].x+TIMGW,knownEyeRegions[j].y+TIMGH), 
