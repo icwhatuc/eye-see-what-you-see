@@ -12,8 +12,7 @@
 
 #define EXPECTEDFPS	30
 
-#define THRESHOLD	10
-#define HISTTHRESHOLD 0.00001
+#define HISTTHRESHOLD 0.01
 #define COLOUR		255
 
 #define USECSPERSEC		1000000
@@ -87,31 +86,21 @@ float predict_eye(CvSVM &svm, Mat &img_mat_orig)
 	return retval;
 }
 
-bool overlap(Rect &region1, Rect &region2)
-{
-	if((region1 & region2).size().area() > 25)
-		return true;
-}
+#define overlap(r1,r2) ((r1 & r2).size().area() > (TIMGW*TIMGH)/20)
+//bool overlap(Rect &region1, Rect &region2)
+//{
+	//return (region1 & region2).size().area() > TIMGW/2;
+//}
 
-int isKnown(Rect &region, Vector <Rect> &regionlist)
+int isKnown(Rect &region, std::vector<Rect> &regionlist)
 {
-	int index = -1; /* index @ which there is a region similar to parameter in regionlist */
-	for(index = 0; index < regionlist.size(); index++)
+	/* index @ which there is a region similar to parameter in regionlist */
+	for(int index = 0; index < regionlist.size(); index++)
 	{
-		//printf("isKnown: inside loop\n");
 		if(overlap(region, regionlist[index]))
-			break;
+			return index;
 	}
-	
-	//printf("isKnown: retval = %d\n", index);
-	
-	if(index == regionlist.size())
-	{
-		//printf("but returned -1\n");
-		return -1;
-	}
-	
-	return index;
+	return -1;
 }
 
 int main(int argc, char *argv[])
@@ -143,7 +132,7 @@ int main(int argc, char *argv[])
 	VideoWriter *record; 
 	
 	short recordcandidates = 0, gethistbasis = 1;
-	char arduino_state = '0', filename[256];
+	char arduino_state = '0', filename[256], num_eyes_str[16];
 	int i = 0, j = 0, delay = 100000000, debug = 0, thresh = 100, framecount = 1;
 	long stc, etc;
 	bool captureFlag = false;
@@ -157,11 +146,9 @@ int main(int argc, char *argv[])
 	
 	std::ofstream arduino("/dev/ttyUSB0");
 
-	
 	/* svm stuff */
 	CvSVM svm;
 	svm.load("eye_classify.svm");
-	
 	
 	/* parameters to detect blobs of pupils */
 	SimpleBlobDetector::Params params;
@@ -171,7 +158,7 @@ int main(int argc, char *argv[])
 	params.filterByColor = false;
 	params.filterByCircularity = true;
 	params.filterByArea = true;
-	params.minArea = 5.0f;
+	params.minArea = 3.0f;
 	params.maxArea = 200.0f;
 	params.minCircularity = 0.5f;
 	params.maxCircularity = 1.0f;
@@ -190,14 +177,14 @@ int main(int argc, char *argv[])
 
 	/* Create windows in which the captured images will be presented */
 	cvNamedWindow( "difference", CV_WINDOW_NORMAL );
-	cvNamedWindow( "currframe_mat", CV_WINDOW_NORMAL );
+	cvNamedWindow( "currframe_mat", CV_WINDOW_NORMAL);
 	cvNamedWindow( "thresholded_diff", CV_WINDOW_NORMAL );
 	//cvNamedWindow( "backprojection", CV_WINDOW_NORMAL );
 	
 	
 	/* Eye tracking */
-	Vector <Rect> knownEyeRegions;
-	Vector <bool> regionsKnown;
+	std::vector <Rect> knownEyeRegions;
+	std::vector <bool> regionsKnown;
 	
 	// Show the image captured from the camera in the window and repeat
 	currframe = cvQueryFrame(capture);
@@ -212,6 +199,7 @@ int main(int argc, char *argv[])
 	const float* histRange = { range };
 	int bins = HISTSIZE;
 	int histThreshold = (CAMWIDTH * CAMHEIGHT)*HISTTHRESHOLD;
+	int prev_num_eyes = 0;
 
 	while (1)
 	{
@@ -223,6 +211,15 @@ int main(int argc, char *argv[])
 		
 		if(!currframe)
 			break;
+		
+		// record video
+		if (captureFlag == true)
+		{
+			if (DEBUGON) printf("Recording frame\n");
+			//Mat diff_img_color;
+			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
+			(*record) << currframe_mat; 
+		}
 		
 		currframe_mat = currframe;
 		
@@ -241,6 +238,7 @@ int main(int argc, char *argv[])
 		GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
 		//equalizeHist(diff_img, diff_img);
 
+		// Find threshold based on histogram
 		calcHist(&diff_img, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false);
 		int histCount = 0, bin;
 		for (bin = HISTSIZE; bin > 0; bin--) {
@@ -268,6 +266,7 @@ int main(int argc, char *argv[])
 			regionsKnown[j] = false;
 		}
 		
+		int num_eyes = 0;
 		//printf("checking out each keyPoint and verifying last known regions...\n");
 		for (j = 0; j < keypoints.size(); j++)
 		{
@@ -290,6 +289,7 @@ int main(int argc, char *argv[])
 			
 			if(predict_eye(svm, candidateimg) == EYECLASS)
 			{
+				num_eyes++;
 				//printf("call to isKnown\n");
 				int index = isKnown(candidateRegion, knownEyeRegions);
 				//printf("index = %d\n", index);
@@ -300,15 +300,14 @@ int main(int argc, char *argv[])
 				}
 				else
 				{
-					//std::cout << "added region: " << candidateRegion.x << ", " << candidateRegion.y << std::endl;
-					knownEyeRegions.push_back(candidateRegion);
 					regionsKnown.push_back(true);
+					knownEyeRegions.push_back(candidateRegion);
 				}
 					
 				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
 			}
 		}
-		
+
 		//printf("filling in missed information...\n");
 		for(j = 0; j < regionsKnown.size(); j++)
 		{
@@ -320,22 +319,25 @@ int main(int argc, char *argv[])
 				else
 					candidateimg = prevframe_gray(knownEyeRegions[j]);
 				
-				//if(predict_eye(svm, candidateimg) == EYECLASS)
-					//circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
+				if(predict_eye(svm, candidateimg) == EYECLASS) {
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
+					rectangle(currframe_mat, Point(knownEyeRegions[j].x,knownEyeRegions[j].y), 
+						Point(knownEyeRegions[j].x+TIMGW,knownEyeRegions[j].y+TIMGH), 
+						CV_RGB(0,0,0),2);
+					num_eyes++;
+				}
+				else {
+					knownEyeRegions.erase(knownEyeRegions.begin()+j);
+					regionsKnown.erase(regionsKnown.begin()+j);
+				}
 			}
 		}
-		
+
+		prev_num_eyes = num_eyes;
+		sprintf(num_eyes_str,"Eyes: %d",num_eyes);
+		putText(currframe_mat, num_eyes_str, Point(30,100), FONT_HERSHEY_COMPLEX_SMALL,
+			3, RED, 1, CV_AA);
 		imshow("currframe_mat", currframe_mat);
-		
-		
-		// record video
-		if (captureFlag == true)
-		{
-			if (DEBUGON) printf("Recording frame\n");
-			//Mat diff_img_color;
-			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
-			(*record) << currframe_mat; 
-		}
 		
 		std::swap(prevframe_gray,currframe_gray);
 
@@ -357,7 +359,19 @@ int main(int argc, char *argv[])
 		{
 			if (DEBUGON) printf("time elapsed %f usecs. wait time = %d msecs\n", time_elapsed, wait_time);
 		}
-
+		else if ( (keyVal) == 'f' )
+		{
+			for(int i=0; i<5; i++)
+				currframe = cvQueryFrame(capture);
+		}
+		// DEBUG: temporary stuff
+		else if ( (keyVal) == 'n' ) 
+		{
+			while(int key = cvWaitKey(wait_time) & 255) {
+				if (key == 'n')
+					break;
+			}
+		}
 		else if ( (keyVal) == 't' )
 		{
 			flip(arduino_state);	
