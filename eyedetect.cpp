@@ -12,7 +12,8 @@
 
 #define EXPECTEDFPS	30
 
-#define THRESHOLD	250
+#define THRESHOLD	10
+#define HISTTHRESHOLD 0.00001
 #define COLOUR		255
 
 #define USECSPERSEC		1000000
@@ -40,7 +41,7 @@
 #define BLUE		(CV_RGB(0,0,255))
 #define GREEN		(CV_RGB(0,255,0))
 
-#define HISTSIZE	26
+#define HISTSIZE	256
 
 #define centerOfRect(R)	(Point(R.x + R.width/2, R.y + R.height/2))
 
@@ -158,13 +159,11 @@ int main(int argc, char *argv[])
 
 	
 	/* svm stuff */
-	
 	CvSVM svm;
 	svm.load("eye_classify.svm");
 	
 	
 	/* parameters to detect blobs of pupils */
-	
 	SimpleBlobDetector::Params params;
 	params.minDistBetweenBlobs = 50.0f;
 	params.filterByInertia = false;
@@ -172,7 +171,7 @@ int main(int argc, char *argv[])
 	params.filterByColor = false;
 	params.filterByCircularity = true;
 	params.filterByArea = true;
-	params.minArea = 50.0f;
+	params.minArea = 5.0f;
 	params.maxArea = 200.0f;
 	params.minCircularity = 0.5f;
 	params.maxCircularity = 1.0f;
@@ -192,8 +191,8 @@ int main(int argc, char *argv[])
 	/* Create windows in which the captured images will be presented */
 	cvNamedWindow( "difference", CV_WINDOW_NORMAL );
 	cvNamedWindow( "currframe_mat", CV_WINDOW_NORMAL );
-	//cvNamedWindow( "thresholded_diff", CV_WINDOW_NORMAL );
-	cvNamedWindow( "backprojection", CV_WINDOW_NORMAL );
+	cvNamedWindow( "thresholded_diff", CV_WINDOW_NORMAL );
+	//cvNamedWindow( "backprojection", CV_WINDOW_NORMAL );
 	
 	
 	/* Eye tracking */
@@ -209,6 +208,11 @@ int main(int argc, char *argv[])
 	printf("frame: width = %d and height = %d\n", currframe->width, currframe->height);
 	cvResizeWindow("currframe_mat", 1920, 1080);
 
+	float range[] = { 0, 256 } ;
+	const float* histRange = { range };
+	int bins = HISTSIZE;
+	int histThreshold = (CAMWIDTH * CAMHEIGHT)*HISTTHRESHOLD;
+
 	while (1)
 	{
 		arduino << arduino_state;
@@ -222,44 +226,39 @@ int main(int argc, char *argv[])
 		
 		currframe_mat = currframe;
 		
-		// record video
-		if (captureFlag == true)
-		{
-			if (DEBUGON) printf("Recording frame\n");
-			//Mat diff_img_color;
-			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
-			(*record) << currframe_mat; 
-		}
-		
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
 		absdiff(prevframe_gray, currframe_gray, diff_copy);
 		
 		diff_img = diff_copy.clone();
 		
-		float range[] = { 0, 256 } ;
-		const float* histRange = { range };
-		int bins = HISTSIZE;
-	
-		calcHist( &diff_copy, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false );
-		calcBackProject ( &diff_copy, 1, 0, hist, backprojection, &histRange );
-		equalizeHist(backprojection, backprojection);
-		imshow("backprojection", backprojection);
+		//calcHist( &diff_copy, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false );
+		//calcBackProject ( &diff_copy, 1, 0, hist, backprojection, &histRange );
+		//equalizeHist(backprojection, backprojection);
+		//imshow("backprojection", backprojection);
+		//GaussianBlur( backprojection, backprojection, Size(9,9), 16, 16 );
 		
-		GaussianBlur( backprojection, backprojection, Size(9,9), 16, 16 );
-		/*
 		GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
-		equalizeHist(diff_img, diff_img);
-		threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
-		*/
+		//equalizeHist(diff_img, diff_img);
+
+		calcHist(&diff_img, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false);
+		int histCount = 0, bin;
+		for (bin = HISTSIZE; bin > 0; bin--) {
+			histCount += hist.at<float>(bin);
+			if (histCount > HISTTHRESHOLD)
+				break;
+		}
+		threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
+
+		//threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
 		imshow("difference", diff_copy);
-		//imshow("thresholded_diff", diff_img);
+		imshow("thresholded_diff", diff_img);
 		
-		//blob_detector->detect(diff_img, keypoints);
-		//drawKeypoints(currframe_mat,keypoints,currframe_mat,BLUE);
-		
-		blob_detector->detect(backprojection, keypoints);
+		blob_detector->detect(diff_img, keypoints);
 		drawKeypoints(currframe_mat,keypoints,currframe_mat,BLUE);
+		
+		//blob_detector->detect(backprojection, keypoints);
+		//drawKeypoints(currframe_mat,keypoints,currframe_mat,BLUE);
 		
 		/* clean regionsKnown */
 		//printf("cleaning the regionsKnown information from last frame...\n");
@@ -321,12 +320,22 @@ int main(int argc, char *argv[])
 				else
 					candidateimg = prevframe_gray(knownEyeRegions[j]);
 				
-				if(predict_eye(svm, candidateimg) == EYECLASS)
-					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
+				//if(predict_eye(svm, candidateimg) == EYECLASS)
+					//circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
 			}
 		}
 		
 		imshow("currframe_mat", currframe_mat);
+		
+		
+		// record video
+		if (captureFlag == true)
+		{
+			if (DEBUGON) printf("Recording frame\n");
+			//Mat diff_img_color;
+			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
+			(*record) << currframe_mat; 
+		}
 		
 		std::swap(prevframe_gray,currframe_gray);
 
@@ -397,7 +406,7 @@ int main(int argc, char *argv[])
 				case SSORIG: imgtype = "coloredorig"; 
 					ss = &currframe_mat; break;
 				case SSDIFFIMG: imgtype = "diffimg"; 
-					ss = &diff_img; break;
+					ss = &diff_copy; break;
 			}
 						
 			sprintf(filename, "./snapshots/%s_%d-%d-%d_%d:%d:%d.jpg", imgtype, 
