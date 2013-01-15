@@ -12,7 +12,7 @@
 #include <ctime>
 
 #define EYECLASS	1
-#define NONEYECLASS	-1
+#define NONEYECLASS -1
 
 int count_files(DIR *dp);
 float predict_eye(CvSVM &svm, char *img_path);
@@ -25,7 +25,7 @@ int main()
 	std::string filename;
 
 	char *dirname1 = "./candidates/pos/";		// positive
-	char *dirname2 = "./candidates/neg_old/", *currdirname;	// negative
+	char *dirname2 = "./candidates/neg/", *currdirname;	// negative
 	char *testdir  = "./candidates/test/";		
 	dp1 = opendir(dirname1);
 	dp2 = opendir(dirname2);
@@ -115,12 +115,17 @@ int main()
 	//std::cout << labels << std::endl;
 
 	// Initialize the SVM with parameters
+	float weights[2] = {1, 2};
+	CvMat weights_cvmat;
+	cvInitMatHeader( &weights_cvmat, 2, 1, CV_32FC1, weights);
+	
 	CvSVMParams params;
 	params.svm_type    = CvSVM::C_SVC;
 	params.kernel_type = CvSVM::POLY;
 	params.gamma = 3;
 	params.term_crit   = cvTermCriteria(CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 15000, 1e-6);
 	params.degree = 2;
+	params.class_weights = &weights_cvmat;
 	
 	fprintf(stderr, "training svm...\n");
 	
@@ -138,7 +143,7 @@ int main()
 	fprintf(stderr, "finished training svm...\n");
 	std::cout << (double)final/(double)CLOCKS_PER_SEC << " secs\n";
 	
-	svm.save("eye_classify_oldworking.svm");
+	svm.save("eye_classify_withweights.svm");
 
 	// Print out the filenames that correspond to the support vectors
 	int num_supports = svm.get_support_vector_count();

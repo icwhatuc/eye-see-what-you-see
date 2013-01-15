@@ -47,6 +47,9 @@
 
 using namespace cv;
 
+time_t t, currrunstamp;
+struct tm * now, *currrunstamp_tm;
+
 int isInRect(Point2f &pt, Rect &r)
 {
 	if(pt.x < (r.x + r.width) && pt.x > r.x
@@ -107,6 +110,8 @@ int isKnown(Rect &region, std::vector<Rect> &regionlist)
 void displayEyePair(Mat &img, eyepair *ep)
 {
 	int x = 0, y = 0, x1 = 0, y1 = 0;
+	static int paircounter = 0;
+	char filename[256];
 	
 	if(ep->firsteye.x < ep->secondeye.x)
 	{
@@ -130,7 +135,24 @@ void displayEyePair(Mat &img, eyepair *ep)
 		y1 = ep->firsteye.y + ep->firsteye.height;
 	}
 	
-	rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+	//rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+	
+	Mat trainimg = img(Rect(x, y, x1-x, y1-y));
+	
+	sprintf(filename, "candidates/paircandidate%d_%d_%02d%02d%02d_%d.jpg", 
+		currrunstamp_tm->tm_mon, 
+		currrunstamp_tm->tm_mday,
+		currrunstamp_tm->tm_hour,
+		currrunstamp_tm->tm_min,
+		currrunstamp_tm->tm_sec,
+		paircounter);
+	
+	Mat resizedpair(25, 75, CV_8UC1);
+	
+	resize(trainimg, resizedpair, resizedpair.size(), 1, 1);
+	
+	imwrite(filename, resizedpair);
+	paircounter++;
 }
 
 int main(int argc, char *argv[])
@@ -152,8 +174,8 @@ int main(int argc, char *argv[])
 
 	
 	/* time when application is run for naming any files the application writes and saves */
-	time_t t, currrunstamp = time(0);
-	struct tm * now, *currrunstamp_tm = localtime(&currrunstamp);
+	currrunstamp = time(0);
+	currrunstamp_tm = localtime(&currrunstamp);
 	
 	currrunstamp_tm->tm_year += 1900;
 	currrunstamp_tm->tm_mon += 1;
@@ -170,7 +192,7 @@ int main(int argc, char *argv[])
 	
 	Point minloc, maxloc;	
 	IplImage *prevframe, *currframe;
-    Mat prevframe_mat, prevframe_gray, currframe_mat, 
+    Mat prevframe_mat, prevframe_gray, currframe_mat, currframe_matcopy, 
 		currframe_gray, diff_img, diff_copy, colored_diff_img, element, 
 		openedimg, openeddiffimg, overlappedimg, hist, backprojection;
 	
@@ -178,7 +200,7 @@ int main(int argc, char *argv[])
 
 	/* svm stuff */
 	CvSVM svm;
-	svm.load("eye_classify_oldworking.svm");
+	svm.load("eye_classify_withweights.svm");
 	
 	/* parameters to detect blobs of pupils */
 	SimpleBlobDetector::Params params;
@@ -243,8 +265,8 @@ int main(int argc, char *argv[])
 		if(!currframe)
 			break;
 		
-	
 		currframe_mat = currframe;
+		currframe_matcopy = currframe_mat.clone();
 		
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
@@ -391,23 +413,25 @@ int main(int argc, char *argv[])
 			}
 		}
 		
+		int numberofeyes = regionsKnown.size();
+		
 		/* pairing eyes */
-		/*for(int i1 = 0; i1 < regionsKnown.size()-1; i1++)
+		for(int i1 = 0; i1 < numberofeyes-1; i1++)
 		{
-			for(int i2 = i1+1; i2 < regionsKnown.size(); i2++)
+			for(int i2 = i1+1; i2 < numberofeyes; i2++)
 			{
 				struct _eyepair currpair;
 				currpair.firsteye = knownEyeRegions[i1];
 				currpair.secondeye = knownEyeRegions[i2];
 				knownEyePairs.push_back(currpair);
 			}
-		}*/
+		}
 		
 		/* display eyepairs */
-		/*for(int i = 0; i < knownEyePairs.size(); i++)
+		for(int i = 0; i < knownEyePairs.size(); i++)
 		{
-			displayEyePair(currframe_mat, &(knownEyePairs[i]));
-		}*/
+			displayEyePair(currframe_gray, &(knownEyePairs[i]));
+		}
 		
 
 
