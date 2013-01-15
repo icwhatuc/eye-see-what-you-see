@@ -9,10 +9,11 @@
 #include <ml.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include "eyepair.h"
 
 #define EXPECTEDFPS	30
 
-#define HISTTHRESHOLD 0.01
+#define HISTTHRESHOLD 0.001
 #define COLOUR		255
 
 #define USECSPERSEC		1000000
@@ -103,6 +104,35 @@ int isKnown(Rect &region, std::vector<Rect> &regionlist)
 	return -1;
 }
 
+void displayEyePair(Mat &img, eyepair *ep)
+{
+	int x = 0, y = 0, x1 = 0, y1 = 0;
+	
+	if(ep->firsteye.x < ep->secondeye.x)
+	{
+		x = ep->firsteye.x;
+		x1 = ep->secondeye.x + ep->secondeye.width;
+	}
+	else
+	{
+		x = ep->secondeye.x;
+		x1 = ep->firsteye.x + ep->firsteye.width;
+	}
+	
+	if(ep->firsteye.y < ep->secondeye.y)
+	{
+		y = ep->firsteye.y;
+		y1 = ep->secondeye.y + ep->secondeye.height;
+	}
+	else
+	{
+		y = ep->secondeye.y;
+		y1 = ep->firsteye.y + ep->firsteye.height;
+	}
+	
+	rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+}
+
 int main(int argc, char *argv[])
 {
 	/* setup the capture - either file or camera based on command line args */
@@ -148,7 +178,7 @@ int main(int argc, char *argv[])
 
 	/* svm stuff */
 	CvSVM svm;
-	svm.load("eye_classify.svm");
+	svm.load("eye_classify_oldworking.svm");
 	
 	/* parameters to detect blobs of pupils */
 	SimpleBlobDetector::Params params;
@@ -203,7 +233,7 @@ int main(int argc, char *argv[])
 
 	while (1)
 	{
-		std::vector <Rect> drawnRegions;
+		std::vector< eyepair> knownEyePairs;
 		arduino << arduino_state;
 		arduino.flush();
 		stc = cvGetTickCount();
@@ -213,15 +243,7 @@ int main(int argc, char *argv[])
 		if(!currframe)
 			break;
 		
-		// record video
-		if (captureFlag == true)
-		{
-			if (DEBUGON) printf("Recording frame\n");
-			//Mat diff_img_color;
-			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
-			(*record) << currframe_mat; 
-		}
-		
+	
 		currframe_mat = currframe;
 		
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
@@ -311,6 +333,20 @@ int main(int argc, char *argv[])
 				}
 				
 				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
+				
+				// saving every circle square
+				if (recordcandidates)
+				{
+					sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
+							currrunstamp_tm->tm_mon, 
+							currrunstamp_tm->tm_mday,
+							currrunstamp_tm->tm_hour,
+							currrunstamp_tm->tm_min,
+							currrunstamp_tm->tm_sec,
+							framecount,
+							j);
+					imwrite(filename, candidateimg);
+				}
 			}
 		}
 
@@ -332,6 +368,21 @@ int main(int argc, char *argv[])
 						Point(knownEyeRegions[j].x+TIMGW,knownEyeRegions[j].y+TIMGH), 
 						CV_RGB(0,0,0),2);
 					num_eyes++;
+					
+					// saving every circle square
+					if (recordcandidates)
+					{
+						sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
+								currrunstamp_tm->tm_mon, 
+								currrunstamp_tm->tm_mday,
+								currrunstamp_tm->tm_hour,
+								currrunstamp_tm->tm_min,
+								currrunstamp_tm->tm_sec,
+								framecount,
+								j);
+						imwrite(filename, candidateimg);
+					}
+					
 				}
 				else {
 					knownEyeRegions.erase(knownEyeRegions.begin()+j);
@@ -339,12 +390,41 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
+		
+		/* pairing eyes */
+		/*for(int i1 = 0; i1 < regionsKnown.size()-1; i1++)
+		{
+			for(int i2 = i1+1; i2 < regionsKnown.size(); i2++)
+			{
+				struct _eyepair currpair;
+				currpair.firsteye = knownEyeRegions[i1];
+				currpair.secondeye = knownEyeRegions[i2];
+				knownEyePairs.push_back(currpair);
+			}
+		}*/
+		
+		/* display eyepairs */
+		/*for(int i = 0; i < knownEyePairs.size(); i++)
+		{
+			displayEyePair(currframe_mat, &(knownEyePairs[i]));
+		}*/
+		
+
 
 		prev_num_eyes = num_eyes;
 		sprintf(num_eyes_str,"Eyes: %d",num_eyes);
 		putText(currframe_mat, num_eyes_str, Point(30,100), FONT_HERSHEY_COMPLEX_SMALL,
 			3, RED, 1, CV_AA);
 		imshow("currframe_mat", currframe_mat);
+		
+		// record video
+		if (captureFlag == true)
+		{
+			if (DEBUGON) printf("Recording frame\n");
+			//Mat diff_img_color;
+			//cvtColor(diff_img, diff_img_color, CV_GRAY2BGR);
+			(*record) << currframe_mat; 
+		}
 		
 		std::swap(prevframe_gray,currframe_gray);
 
@@ -393,7 +473,7 @@ int main(int argc, char *argv[])
 			{
 				captureFlag=true;
 				if (DEBUGON) printf("video is now on\n");
-				record = new VideoWriter("ICwhatUCVideo.avi", CV_FOURCC('M','J','P','G'), 5, diff_img.size(), true);
+				record = new VideoWriter("icwhatucvideo.avi", CV_FOURCC('M','J','P','G'), 20, diff_img.size(), true);
 				if( !record->isOpened() ) {
 					printf("VideoWriter failed to open!\n");
 				}
@@ -410,6 +490,14 @@ int main(int argc, char *argv[])
 		else if ( (keyVal) == 'x' )
 		{
 			break; // break out of loop to stop program
+		}
+		
+		else if ( (keyVal) == 'c')
+		{
+			if (recordcandidates == 0)
+				recordcandidates = 1;
+			else
+				recordcandidates = 0;
 		}
 		
 		/* image snapshot options */

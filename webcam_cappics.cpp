@@ -207,203 +207,198 @@ int main()
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
 		//if(i++%2) {
-			if(SHOWPREVCURR)
-			{
-				imshow("prevframe_gray", prevframe_gray);
-				imshow("currframe_gray", currframe_gray);
-			}
-			absdiff(prevframe_gray, currframe_gray, diff_img);
-			
-			/*
-			 * MIHIR - do we need this?
-			 *
-			RNG rng(12345);
-			vector<vector<Point> > contours;
-			vector<Vec4i> hierarchy;
-			threshold(diff_img, diff_img, 50, COLOUR, CV_THRESH_BINARY);
-			findContours( diff_img, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
-			//Mat drawing = Mat::zeros( diff_img.size(), CV_8UC3 );
-			for( int i = 0; i< contours.size(); i++ )
-			{
-				Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
-				drawContours( diff_img, contours, i, color, 2, 8, hierarchy, 0, Point() );
-			}
-			*/
+		if(SHOWPREVCURR)
+		{
+			imshow("prevframe_gray", prevframe_gray);
+			imshow("currframe_gray", currframe_gray);
+		}
+		absdiff(prevframe_gray, currframe_gray, diff_img);
+		
+		/*
+		 * MIHIR - do we need this?
+		 *
+		RNG rng(12345);
+		vector<vector<Point> > contours;
+		vector<Vec4i> hierarchy;
+		threshold(diff_img, diff_img, 50, COLOUR, CV_THRESH_BINARY);
+		findContours( diff_img, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
+		//Mat drawing = Mat::zeros( diff_img.size(), CV_8UC3 );
+		for( int i = 0; i< contours.size(); i++ )
+		{
+			Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+			drawContours( diff_img, contours, i, color, 2, 8, hierarchy, 0, Point() );
+		}
+		*/
 
-			if(USEOPENOP && i++%(EXPECTEDFPS*THRESHREFRESHRATE) == 0) // recalculate threshold based on refresh rate
-			{
-				minMaxLoc(diff_img, &min, &max, &minloc, &maxloc);
-				adapt_thresh = (max - min)*thresh_cut + min;
-				//std::cout << "adjusted first thresh\n";
-			}
-			
-			Mat resized_frame;
-			Size s( diff_img.size().width / RESIZEFCTR, diff_img.size().height / RESIZEFCTR );
-			resize( currframe_gray, resized_frame, s, 0, 0, CV_INTER_AREA );
+		if(USEOPENOP && i++%(EXPECTEDFPS*THRESHREFRESHRATE) == 0) // recalculate threshold based on refresh rate
+		{
+			minMaxLoc(diff_img, &min, &max, &minloc, &maxloc);
+			adapt_thresh = (max - min)*thresh_cut + min;
+			//std::cout << "adjusted first thresh\n";
+		}
+		
+		Mat resized_frame;
+		Size s( diff_img.size().width / RESIZEFCTR, diff_img.size().height / RESIZEFCTR );
+		resize( currframe_gray, resized_frame, s, 0, 0, CV_INTER_AREA );
 
-			
-			GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
-			equalizeHist(diff_img, diff_img);
-			threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
+		
+		GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
+		equalizeHist(diff_img, diff_img);
+		threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
 
 /*
-			int dilation_size = 3;
-			Mat element = getStructuringElement( MORPH_ELLIPSE,
-				Size( 2*dilation_size + 1, 2*dilation_size+1 ),
-				Point( dilation_size, dilation_size ) );
-			erode(diff_img, diff_img, element);
+		int dilation_size = 3;
+		Mat element = getStructuringElement( MORPH_ELLIPSE,
+			Size( 2*dilation_size + 1, 2*dilation_size+1 ),
+			Point( dilation_size, dilation_size ) );
+		erode(diff_img, diff_img, element);
 */
-			blob_detector->detect(diff_img, keypoints);
-			
-			drawKeypoints(currframe_mat,keypoints,currframe_mat,colors[0]);
-			//equalizeHist( currframe_gray, currframe_gray );
-			/*cascade.detectMultiScale( resized_frame, faces,
-		    1.1, 2, 0
-		    //|CV_HAAR_FIND_BIGGEST_OBJECT
-		    //|CV_HAAR_DO_ROUGH_SEARCH
-		    |CV_HAAR_SCALE_IMAGE
-		    ,
-		    Size(30, 30) );
-		    
-		    if(recordcandidates)
-		    {	    
-				sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d.jpg", 
-									currrunstamp_tm->tm_mon, 
-									currrunstamp_tm->tm_mday,
-									currrunstamp_tm->tm_hour,
-									currrunstamp_tm->tm_min,
-									currrunstamp_tm->tm_sec,
-									framecount);
-				imwrite(filename, currframe_mat);
-		    }
-		    
-			if(keypoints.size() > 0)
-		    {
-				for( i = 0; i < faces.size(); i++ )
-				{
-					Scalar color = colors[i%8];
-					// cut off bottom half of the rectangle
-					// faces[i].height/=2;
-					
-					faces[i].x*=RESIZEFCTR;
-					faces[i].y*=RESIZEFCTR;
-					faces[i].width*=RESIZEFCTR;
-					faces[i].height*=RESIZEFCTR;
-					
-					faces[i].y += (height/50);
-					//faces[i].height -= (height/10);
-					faces[i].height = faces[i].height*1/2;
-					
-					int oldwidth = faces[i].width;
-					
-					faces[i].width = faces[i].width*5/6;
-					faces[i].x += ((oldwidth - faces[i].width)/2);
-					
-					rectangle(currframe_mat, faces[i], color);
-					//Mat roi = diff_img(faces[i]);
-					
-					/*Point maxLoc;
-					double maxval;
-				
-					minMaxLoc(roi, 0, &maxval, 0, &maxLoc);
-				
-					if(maxval < 50)
-						continue;
-					maxLoc.x += faces[i].x;
-					maxLoc.y += faces[i].y;
-					circle(currframe_mat, maxLoc, 5, color, 3);
-					
-				}
-			}*/
-			if(recordcandidates)
+		blob_detector->detect(diff_img, keypoints);
+		
+		drawKeypoints(currframe_mat,keypoints,currframe_mat,colors[0]);
+		//equalizeHist( currframe_gray, currframe_gray );
+		/*cascade.detectMultiScale( resized_frame, faces,
+		1.1, 2, 0
+		//|CV_HAAR_FIND_BIGGEST_OBJECT
+		//|CV_HAAR_DO_ROUGH_SEARCH
+		|CV_HAAR_SCALE_IMAGE
+		,
+		Size(30, 30) );
+	*/	
+		if(recordcandidates)
+		{	    
+			sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d.jpg", 
+								currrunstamp_tm->tm_mon, 
+								currrunstamp_tm->tm_mday,
+								currrunstamp_tm->tm_hour,
+								currrunstamp_tm->tm_min,
+								currrunstamp_tm->tm_sec,
+								framecount);
+			imwrite(filename, currframe_mat);
+		}
+	/*	
+		if(keypoints.size() > 0)
+		{
+			for( i = 0; i < faces.size(); i++ )
 			{
-				for (int j = 0; j < keypoints.size(); j++)
-				{
-				//std::cout << keypoints[i].pt.x << ", " << keypoints[i].pt.y << std::endl;
-				//if(isInRect(keypoints[j].pt, faces[i]))
-					//circle(currframe_mat, keypoints[j].pt, 15, color, 3);
+				Scalar color = colors[i%8];
+				// cut off bottom half of the rectangle
+				// faces[i].height/=2;
 				
+				faces[i].x*=RESIZEFCTR;
+				faces[i].y*=RESIZEFCTR;
+				faces[i].width*=RESIZEFCTR;
+				faces[i].height*=RESIZEFCTR;
 				
-					int x, y;
-					x = (int)(keypoints[j].pt.x - TIMGW/2);
-					y = (int)(keypoints[j].pt.y - TIMGH/2);
-					
-					if(x < 0 || y < 0 ||
-						x + TIMGW >= CAMWIDTH ||
-						y + TIMGH >= CAMHEIGHT)
-						continue;
-					
-					Rect candidateRegion(x, y, TIMGW, TIMGH);
+				faces[i].y += (height/50);
+				//faces[i].height -= (height/10);
+				faces[i].height = faces[i].height*1/2;
 				
-					sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d.jpg", 
-							currrunstamp_tm->tm_mon, 
-							currrunstamp_tm->tm_mday,
-							currrunstamp_tm->tm_hour,
-							currrunstamp_tm->tm_min,
-							currrunstamp_tm->tm_sec,
-							framecount,
-							j);
-					if(arduino_state != '0')
-					{
-						Mat candidateimg = currframe_gray(candidateRegion);
-						imwrite(filename, candidateimg);						
-					}
-					else
-					{
-						Mat candidateimg = prevframe_gray(candidateRegion);
-						imwrite(filename, candidateimg);
-					}
-				}
+				int oldwidth = faces[i].width;
 				
-				recordcandidates = 0;
+				faces[i].width = faces[i].width*5/6;
+				faces[i].x += ((oldwidth - faces[i].width)/2);
+				
+				rectangle(currframe_mat, faces[i], color);
+				//Mat roi = diff_img(faces[i]);
+				
+				/*Point maxLoc;
+				double maxval;
+			
+				minMaxLoc(roi, 0, &maxval, 0, &maxLoc);
+			
+				if(maxval < 50)
+					continue;
+				maxLoc.x += faces[i].x;
+				maxLoc.y += faces[i].y;
+				circle(currframe_mat, maxLoc, 5, color, 3);
+				
 			}
-			
-			
-			j++;
-			/* testing synchronization and checking bright and dark images
-			
-			if(j < 1000)
+		}*/
+		if(recordcandidates)
+		{
+			for (int j = 0; j < keypoints.size(); j++)
 			{
-				char filename[100];
-				if(arduino_state == '0')
+				int x, y;
+				x = (int)(keypoints[j].pt.x - TIMGW/2);
+				y = (int)(keypoints[j].pt.y - TIMGH/2);
+				
+				if(x < 0 || y < 0 ||
+					x + TIMGW >= CAMWIDTH ||
+					y + TIMGH >= CAMHEIGHT)
+					continue;
+				
+				Rect candidateRegion(x, y, TIMGW, TIMGH);
+			
+				sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d.jpg", 
+						currrunstamp_tm->tm_mon, 
+						currrunstamp_tm->tm_mday,
+						currrunstamp_tm->tm_hour,
+						currrunstamp_tm->tm_min,
+						currrunstamp_tm->tm_sec,
+						framecount,
+						j);
+				if(arduino_state != '0')
 				{
-					sprintf(filename, "brightimgs/brightimg%d.jpg", j/2);
-					imwrite(filename, currframe_mat);
+					Mat candidateimg = currframe_gray(candidateRegion);
+					imwrite(filename, candidateimg);						
 				}
 				else
 				{
-					sprintf(filename, "darkimgs/darkimg%d.jpg", j/2);
-					imwrite(filename, currframe_mat);
+					Mat candidateimg = prevframe_gray(candidateRegion);
+					imwrite(filename, candidateimg);
 				}
-				j++;
-			}*/
-			
-			//equalizeHist(diff_img,diff_img);
-			//threshold(diff_img, diff_img, (int)adapt_thresh, COLOUR, THRESH_BINARY);
-			//smooth(diff_img, diff_img, CV_BLUR);
-			imshow("difference", diff_img);
-			imshow("currframe_mat", currframe_mat);
-			if(SHOWHIST)
-				calcplothist(diff_img);
-			if(USEOPENOP && !isOn(arduino_state))
-			{
-				element = getStructuringElement(MORPH_CROSS, Size( 2*MORPHSIZE + 1, 2*MORPHSIZE+1 ), Point( MORPHSIZE, MORPHSIZE ) );
-				morphologyEx( currframe_gray, openedimg, OPENOP, element );
-				absdiff(currframe_gray, openedimg, openeddiffimg);
-				if(i%(EXPECTEDFPS*THRESHREFRESHRATE) == 1) // recalculate threshold
-				{
-					minMaxLoc(openeddiffimg, &min, &max, &minloc, &maxloc);
-					opened_adapt_thresh = (max - min)*.20 + min;
-					//std::cout << "adjusted second thresh\n";
-				}
-				//threshold(openeddiffimg, openeddiffimg, opened_adapt_thresh, COLOUR, THRESH_BINARY);
-				imshow("morphopendiff", openeddiffimg);
-				
-				bitwise_and(openeddiffimg, diff_img, overlappedimg);
-				//threshold(overlappedimg, overlappedimg, COLOUR + 1, 255, THRESH_BINARY);
-				imshow("overlappedimg", overlappedimg);
 			}
-		//}
+			
+			recordcandidates = 0;
+		}
+		
+		
+		j++;
+		/* testing synchronization and checking bright and dark images
+		
+		if(j < 1000)
+		{
+			char filename[100];
+			if(arduino_state == '0')
+			{
+				sprintf(filename, "brightimgs/brightimg%d.jpg", j/2);
+				imwrite(filename, currframe_mat);
+			}
+			else
+			{
+				sprintf(filename, "darkimgs/darkimg%d.jpg", j/2);
+				imwrite(filename, currframe_mat);
+			}
+			j++;
+		}*/
+		
+		//equalizeHist(diff_img,diff_img);
+		//threshold(diff_img, diff_img, (int)adapt_thresh, COLOUR, THRESH_BINARY);
+		//smooth(diff_img, diff_img, CV_BLUR);
+		imshow("difference", diff_img);
+		imshow("currframe_mat", currframe_mat);
+		if(SHOWHIST)
+			calcplothist(diff_img);
+		if(USEOPENOP && !isOn(arduino_state))
+		{
+			element = getStructuringElement(MORPH_CROSS, Size( 2*MORPHSIZE + 1, 2*MORPHSIZE+1 ), Point( MORPHSIZE, MORPHSIZE ) );
+			morphologyEx( currframe_gray, openedimg, OPENOP, element );
+			absdiff(currframe_gray, openedimg, openeddiffimg);
+			if(i%(EXPECTEDFPS*THRESHREFRESHRATE) == 1) // recalculate threshold
+			{
+				minMaxLoc(openeddiffimg, &min, &max, &minloc, &maxloc);
+				opened_adapt_thresh = (max - min)*.20 + min;
+				//std::cout << "adjusted second thresh\n";
+			}
+			//threshold(openeddiffimg, openeddiffimg, opened_adapt_thresh, COLOUR, THRESH_BINARY);
+			imshow("morphopendiff", openeddiffimg);
+			
+			bitwise_and(openeddiffimg, diff_img, overlappedimg);
+			//threshold(overlappedimg, overlappedimg, COLOUR + 1, 255, THRESH_BINARY);
+			imshow("overlappedimg", overlappedimg);
+		}
+	//}
 		
 		//imshow("coloreddiff", colored_diff_img);
 		std::swap(prevframe_gray,currframe_gray);

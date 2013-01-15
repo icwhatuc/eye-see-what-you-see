@@ -24,9 +24,9 @@ int main()
 	struct dirent *ep;
 	std::string filename;
 
-	char *dirname1 = "./candidates/pos/";
-	char *dirname2 = "./candidates/neg/", *currdirname;
-	char *testdir  = "./candidates/test/";
+	char *dirname1 = "./candidates/pos/";		// positive
+	char *dirname2 = "./candidates/neg_old/", *currdirname;	// negative
+	char *testdir  = "./candidates/test/";		
 	dp1 = opendir(dirname1);
 	dp2 = opendir(dirname2);
 	testdp = opendir(testdir);
@@ -47,7 +47,7 @@ int main()
 	int imgsize = img.size().area();
 
 	// Count files to get number of rows in SVM input
-	int negcount = count_files(dp2)/5;
+	int negcount = count_files(dp2);
 	int filecount = count_files(dp1)*2 /* normal eyes & flipped eyes */ + negcount;
 	Mat svm_mat(filecount,imgsize,CV_32FC1);
 
@@ -123,15 +123,22 @@ int main()
 	params.degree = 2;
 	
 	fprintf(stderr, "training svm...\n");
+	
+
+	
 	// Train the SVM
 	CvSVM svm;
+	
+	// loading doesn't work
+	//svm.load("eye_classify_good.svm");
+	
 	clock_t init = clock();
 	svm.train(svm_mat, labels, Mat(), Mat(), params);
 	clock_t final = clock() - init;
 	fprintf(stderr, "finished training svm...\n");
 	std::cout << (double)final/(double)CLOCKS_PER_SEC << " secs\n";
 	
-	svm.save("eye_classify.svm");
+	svm.save("eye_classify_oldworking.svm");
 
 	// Print out the filenames that correspond to the support vectors
 	int num_supports = svm.get_support_vector_count();
@@ -191,6 +198,8 @@ int main()
 		
 		int result = (int)predict_eye(svm, (char *)param);
 		std::cout << imgname << "\t" << predict_eye(svm, (char *)param) << std::endl;
+		//if (result == 1)
+			//std::cout << "mv " << tmp << " ./candidates/neg_pos_pos/" << imgname << std::endl;
 		
 		//std::cout << predict_eye(svm, dirname1+imgname) << std::endl;
 	}
