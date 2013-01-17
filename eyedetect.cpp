@@ -107,6 +107,40 @@ int isKnown(Rect &region, std::vector<Rect> &regionlist)
 	return -1;
 }
 
+bool predict_eye_haar(Mat &img) {
+	static CascadeClassifier cascade;
+	if (cascade.empty() && !cascade.load("cascades/haarcascade_eye.xml")) {
+		fprintf(stderr, "ERROR: could not load haar cascade xml for eye\n");
+		exit(-1);
+	}
+    Mat img_mat;
+	std::vector<Rect> eyes;
+	equalizeHist(img,img_mat);
+	cascade.detectMultiScale(img_mat, eyes, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING, Size(20,20) );
+	return eyes.size() == 1;
+}
+
+bool predict_eyepair(Mat &img) {
+	//struct timeval start, end;
+	//long mtime, seconds, useconds;
+	//gettimeofday(&start, NULL);
+	static CascadeClassifier cascade;
+	if (cascade.empty() && !cascade.load("cascades/haarcascade_eyepair.xml")) {
+		fprintf(stderr, "ERROR: could not load haar cascade xml for eye pairs\n");
+		exit(-1);
+	}
+    Mat img_mat;
+	std::vector<Rect> eyepairs;
+	equalizeHist(img,img_mat);
+	cascade.detectMultiScale(img_mat, eyepairs, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING, Size(50,20) );
+	//gettimeofday(&end, NULL);
+	//seconds  = end.tv_sec  - start.tv_sec;
+    //useconds = end.tv_usec - start.tv_usec;
+    //mtime = ((seconds) * 1000 + useconds/1000.0) + 0.5;
+	//printf("Elapsed time: %ld milliseconds\n", mtime);
+	return eyepairs.size() == 1;
+}
+
 void displayEyePair(Mat &img, eyepair *ep)
 {
 	int x = 0, y = 0, x1 = 0, y1 = 0;
@@ -139,7 +173,7 @@ void displayEyePair(Mat &img, eyepair *ep)
 	
 	Mat trainimg = img(Rect(x, y, x1-x, y1-y));
 	
-	sprintf(filename, "candidates/paircandidate%d_%d_%02d%02d%02d_%d.jpg", 
+	sprintf(filename, "/home/icwhatuc/will/tmp/paircandidate%d_%d_%02d%02d%02d_%d.jpg", 
 		currrunstamp_tm->tm_mon, 
 		currrunstamp_tm->tm_mday,
 		currrunstamp_tm->tm_hour,
@@ -147,11 +181,15 @@ void displayEyePair(Mat &img, eyepair *ep)
 		currrunstamp_tm->tm_sec,
 		paircounter);
 	
-	Mat resizedpair(25, 75, CV_8UC1);
-	
+	Mat resizedpair(TIMGW, TIMGW*2, CV_8UC1);
 	resize(trainimg, resizedpair, resizedpair.size(), 1, 1);
 	
-	imwrite(filename, resizedpair);
+	if (predict_eyepair(resizedpair)) {
+		//line(img,Point(ep->firsteye.x,ep->firsteye.y),Point(ep->secondeye.x,ep->secondeye.y),CV_RGB(0,0,255),2);
+		rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+		//imwrite(filename, trainimg);
+		//std::cout << "line at " << ep->firsteye.x << " " << ep->firsteye.y << std::endl;
+	}
 	paircounter++;
 }
 
@@ -185,7 +223,7 @@ int main(int argc, char *argv[])
 	
 	short recordcandidates = 0, gethistbasis = 1;
 	char arduino_state = '0', filename[256], num_eyes_str[16];
-	int i = 0, j = 0, delay = 100000000, debug = 0, thresh = 100, framecount = 1, eyeclass_c = 0, noneyeclass_c = 0;
+	int i = 0, j = 0, delay = 100000000, debug = 0, thresh = 100, framecount = 1;
 	long stc, etc;
 	bool captureFlag = false;
 	double min, max, adapt_thresh, opened_adapt_thresh, time_elapsed;
@@ -208,7 +246,7 @@ int main(int argc, char *argv[])
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
 	params.filterByColor = false;
-	params.filterByCircularity = false;
+	params.filterByCircularity = true;
 	params.filterByArea = true;
 	params.minArea = 3.0f;
 	params.maxArea = 200.0f;
@@ -253,6 +291,7 @@ int main(int argc, char *argv[])
 	int histThreshold = (CAMWIDTH * CAMHEIGHT)*HISTTHRESHOLD;
 	int prev_num_eyes = 0;
 
+	static int haar_count, svm_count; // DEBUG
 	while (1)
 	{
 		std::vector< eyepair> knownEyePairs;
@@ -280,7 +319,7 @@ int main(int argc, char *argv[])
 		//imshow("backprojection", backprojection);
 		//GaussianBlur( backprojection, backprojection, Size(9,9), 16, 16 );
 		
-		GaussianBlur( diff_img, diff_img, Size(9, 9), 8, 8 );
+		GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
 		//equalizeHist(diff_img, diff_img);
 
 		// Find threshold based on histogram
@@ -312,12 +351,11 @@ int main(int argc, char *argv[])
 		}
 		
 		int num_eyes = 0;
-		std::cout << keypoints.size() << std::endl;
 		//printf("checking out each keyPoint and verifying last known regions...\n");
 		for (j = 0; j < keypoints.size(); j++)
 		{
-			int x, y, height, width;
-			Mat candidateimg, featuresizedimg;
+			int x, y;
+			Mat candidateimg;
 			
 			x = (int)(keypoints[j].pt.x - TIMGW/2);
 			y = (int)(keypoints[j].pt.y - TIMGH/2);
@@ -333,8 +371,12 @@ int main(int argc, char *argv[])
 			else
 				candidateimg = prevframe_gray(candidateRegion);
 			
+
 			if(predict_eye(svm, candidateimg) == EYECLASS)
+				svm_count++; // DEBUG
+			if(predict_eye_haar(candidateimg)) // DEBUG
 			{
+				haar_count++;
 				num_eyes++;
 				//printf("call to isKnown\n");
 				int index;
@@ -358,9 +400,10 @@ int main(int argc, char *argv[])
 				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
 				
 				// saving every circle square
-				if (recordcandidates)
+				//if (recordcandidates)
 				{
-					sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
+					//sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
+					sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
 							currrunstamp_tm->tm_mon, 
 							currrunstamp_tm->tm_mday,
 							currrunstamp_tm->tm_hour,
@@ -368,6 +411,16 @@ int main(int argc, char *argv[])
 							currrunstamp_tm->tm_sec,
 							framecount,
 							j);
+					imwrite(filename, candidateimg);
+					sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_red2.jpg", 
+							currrunstamp_tm->tm_mon, 
+							currrunstamp_tm->tm_mday,
+							currrunstamp_tm->tm_hour,
+							currrunstamp_tm->tm_min,
+							currrunstamp_tm->tm_sec,
+							framecount,
+							j);
+					candidateimg = diff_img(candidateRegion); // DEBUG
 					imwrite(filename, candidateimg);
 				}
 			}
@@ -385,7 +438,10 @@ int main(int argc, char *argv[])
 					candidateimg = prevframe_gray(knownEyeRegions[j]);
 				
 				if(predict_eye(svm, candidateimg) == EYECLASS)
+					svm_count++;
+				if(predict_eye_haar(candidateimg)) // DEBUG
 				{
+					haar_count++;
 					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
 					rectangle(currframe_mat, Point(knownEyeRegions[j].x,knownEyeRegions[j].y), 
 						Point(knownEyeRegions[j].x+TIMGW,knownEyeRegions[j].y+TIMGH), 
@@ -393,9 +449,10 @@ int main(int argc, char *argv[])
 					num_eyes++;
 					
 					// saving every circle square
-					if (recordcandidates)
+					//if (recordcandidates)
 					{
-						sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
+						//sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
+						sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
 								currrunstamp_tm->tm_mon, 
 								currrunstamp_tm->tm_mday,
 								currrunstamp_tm->tm_hour,
@@ -403,6 +460,16 @@ int main(int argc, char *argv[])
 								currrunstamp_tm->tm_sec,
 								framecount,
 								j);
+						imwrite(filename, candidateimg);
+						sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_green2.jpg", 
+								currrunstamp_tm->tm_mon, 
+								currrunstamp_tm->tm_mday,
+								currrunstamp_tm->tm_hour,
+								currrunstamp_tm->tm_min,
+								currrunstamp_tm->tm_sec,
+								framecount,
+								j);
+						candidateimg = diff_img(knownEyeRegions[j]); // DEBUG
 						imwrite(filename, candidateimg);
 					}
 					
@@ -553,10 +620,8 @@ int main(int argc, char *argv[])
 		flip(arduino_state);	
 		
 	}
-	
-	std::cout << "noneyeclass_c = " << noneyeclass_c << std::endl;
-	std::cout << "eyeclass_c = " << eyeclass_c << std::endl;
-	
+	std::cout << svm_count << " (svm) / " << haar_count << " (haar)";
+
 	// Release the capture device housekeeping
 	cvReleaseCapture( &capture );
 	cvDestroyWindow( "mywindow" );
