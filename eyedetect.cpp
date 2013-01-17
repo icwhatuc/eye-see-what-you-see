@@ -185,7 +185,7 @@ int main(int argc, char *argv[])
 	
 	short recordcandidates = 0, gethistbasis = 1;
 	char arduino_state = '0', filename[256], num_eyes_str[16];
-	int i = 0, j = 0, delay = 100000000, debug = 0, thresh = 100, framecount = 1;
+	int i = 0, j = 0, delay = 100000000, debug = 0, thresh = 100, framecount = 1, eyeclass_c = 0, noneyeclass_c = 0;
 	long stc, etc;
 	bool captureFlag = false;
 	double min, max, adapt_thresh, opened_adapt_thresh, time_elapsed;
@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
 	params.filterByColor = false;
-	params.filterByCircularity = true;
+	params.filterByCircularity = false;
 	params.filterByArea = true;
 	params.minArea = 3.0f;
 	params.maxArea = 200.0f;
@@ -280,7 +280,7 @@ int main(int argc, char *argv[])
 		//imshow("backprojection", backprojection);
 		//GaussianBlur( backprojection, backprojection, Size(9,9), 16, 16 );
 		
-		GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
+		GaussianBlur( diff_img, diff_img, Size(9, 9), 8, 8 );
 		//equalizeHist(diff_img, diff_img);
 
 		// Find threshold based on histogram
@@ -312,11 +312,12 @@ int main(int argc, char *argv[])
 		}
 		
 		int num_eyes = 0;
+		std::cout << keypoints.size() << std::endl;
 		//printf("checking out each keyPoint and verifying last known regions...\n");
 		for (j = 0; j < keypoints.size(); j++)
 		{
-			int x, y;
-			Mat candidateimg;
+			int x, y, height, width;
+			Mat candidateimg, featuresizedimg;
 			
 			x = (int)(keypoints[j].pt.x - TIMGW/2);
 			y = (int)(keypoints[j].pt.y - TIMGH/2);
@@ -552,6 +553,10 @@ int main(int argc, char *argv[])
 		flip(arduino_state);	
 		
 	}
+	
+	std::cout << "noneyeclass_c = " << noneyeclass_c << std::endl;
+	std::cout << "eyeclass_c = " << eyeclass_c << std::endl;
+	
 	// Release the capture device housekeeping
 	cvReleaseCapture( &capture );
 	cvDestroyWindow( "mywindow" );
