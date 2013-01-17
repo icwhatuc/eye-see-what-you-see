@@ -9,6 +9,7 @@
 #include <ml.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <cmath>
 #include "eyepair.h"
 
 #define EXPECTEDFPS	30
@@ -107,7 +108,7 @@ int isKnown(Rect &region, std::vector<Rect> &regionlist)
 	return -1;
 }
 
-bool predict_eye_haar(Mat &img) {
+bool predict_eye_haar(Mat &img, Mat &coloredimg, Point &offset) {
 	static CascadeClassifier cascade;
 	if (cascade.empty() && !cascade.load("cascades/haarcascade_eye.xml")) {
 		fprintf(stderr, "ERROR: could not load haar cascade xml for eye\n");
@@ -117,6 +118,11 @@ bool predict_eye_haar(Mat &img) {
 	std::vector<Rect> eyes;
 	equalizeHist(img,img_mat);
 	cascade.detectMultiScale(img_mat, eyes, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING, Size(20,20) );
+	
+	for(int i = 0 ; i < eyes.size(); i++)
+		rectangle(coloredimg, Point(eyes[i].x + offset.x,eyes[i].y + offset.y), Point(eyes[i].x + eyes[i].width + offset.x, eyes[i].y + eyes[i].height + offset.y), 
+			CV_RGB(255,255,51),2);
+	
 	return eyes.size() == 1;
 }
 
@@ -141,7 +147,7 @@ bool predict_eyepair(Mat &img) {
 	return eyepairs.size() == 1;
 }
 
-void displayEyePair(Mat &img, eyepair *ep)
+void displayEyePair(Mat &img, Mat &coloredimg, eyepair *ep)
 {
 	int x = 0, y = 0, x1 = 0, y1 = 0;
 	static int paircounter = 0;
@@ -173,19 +179,31 @@ void displayEyePair(Mat &img, eyepair *ep)
 	
 	Mat trainimg = img(Rect(x, y, x1-x, y1-y));
 	
-	sprintf(filename, "/home/icwhatuc/will/tmp/paircandidate%d_%d_%02d%02d%02d_%d.jpg", 
+	/*sprintf(filename, "/home/icwhatuc/will/tmp/paircandidate%d_%d_%02d%02d%02d_%d.jpg", 
 		currrunstamp_tm->tm_mon, 
 		currrunstamp_tm->tm_mday,
 		currrunstamp_tm->tm_hour,
 		currrunstamp_tm->tm_min,
 		currrunstamp_tm->tm_sec,
 		paircounter);
-	
+	*/
 	Mat resizedpair(TIMGW, TIMGW*2, CV_8UC1);
 	resize(trainimg, resizedpair, resizedpair.size(), 1, 1);
 	
 	if (predict_eyepair(resizedpair)) {
-		//rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+		int pxdist = (int)sqrt(pow(ep->firsteye.x-ep->secondeye.x, 2) + pow(ep->firsteye.y - ep->secondeye.y, 2));
+		
+		char eyepairinfo[100];
+		sprintf(eyepairinfo, "@(%d,%d); @(%d,%d). %dpx apart.", 
+			ep->firsteye.x, 
+			ep->firsteye.y, 
+			ep->secondeye.x, 
+			ep->secondeye.y, 
+			pxdist);
+	
+		rectangle(coloredimg, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+		putText(coloredimg, eyepairinfo, Point(x,y-50), FONT_HERSHEY_COMPLEX_SMALL,
+			1, RED, 1, CV_AA);
 	}
 	paircounter++;
 }
@@ -258,7 +276,7 @@ int main(int argc, char *argv[])
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
 	params.filterByColor = false;
-	params.filterByCircularity = false;
+	params.filterByCircularity = true;
 	params.filterByArea = true;
 	params.minArea = 3.0f;
 	params.maxArea = 200.0f;
@@ -315,15 +333,25 @@ int main(int argc, char *argv[])
 			if (histCount > HISTTHRESHOLD)
 				break;
 		}
-		// threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
+		//threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
 
 		//threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
+		
+		/*
+		for (int i = 0; i<diff_copy.rows; i++) {
+			for (int j = 0; j < diff_copy.cols; j++) {
+				int scale = 5;
+				diff_copy.at<uchar>(i,j) = (diff_copy.at<uchar>(i,j)*scale > 255)?255:
+					diff_copy.at<uchar>(i,j)*scale;
+			}
+		}
+		*/
 		imshow("difference", diff_copy);
 		imshow("thresholded_diff", diff_img);
 		
 		// Set blob thresholds
-		params.minThreshold = bin-10;
-		params.maxThreshold = bin+10;
+		params.minThreshold = bin-8;
+		params.maxThreshold = bin+8;
 		params.thresholdStep = 2;
 	
 		Ptr<FeatureDetector> blob_detector = new 
@@ -364,7 +392,8 @@ int main(int argc, char *argv[])
 			
 //			if(predict_eye_haar(candidateimg))
 //			if(predict_eye(svm, candidateimg) == EYECLASS)
-			if(predict_eye_haar(candidateimg) || predict_eye(svm, candidateimg) == EYECLASS)
+			Point offset(candidateRegion.x, candidateRegion.y);
+			if(predict_eye_haar(candidateimg, currframe_mat, offset) || predict_eye(svm, candidateimg) == EYECLASS)
 			{
 				num_eyes++;
 				int index;
@@ -385,8 +414,21 @@ int main(int argc, char *argv[])
 					regionsKnown.push_back(true);
 				}
 				
-				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
-				
+				//if(predict_eye_haar(candidateimg, currframe_mat, offset) && predict_eye(svm, candidateimg) == EYECLASS)
+				{
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(255,0,0)), 3);
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 8, (CV_RGB(255,0,0)), 3);
+				}
+				/*else if(predict_eye_haar(candidateimg))
+				{
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(0,255,255)), 3);
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 8, (CV_RGB(0,255,255)), 3);
+				}
+				else if(predict_eye(svm, candidateimg) == EYECLASS)
+				{
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(255,0,255)), 3);
+					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 8, (CV_RGB(255,0,255)), 3);
+				}*/
 				// saving every circle square
 				if (recordcandidates)
 				{
@@ -416,12 +458,20 @@ int main(int argc, char *argv[])
 				
 				//if(predict_eye_haar(candidateimg))
 				//if(predict_eye(svm, candidateimg) == EYECLASS)
-				if(predict_eye_haar(candidateimg) || predict_eye(svm, candidateimg) == EYECLASS)
+				Point offset(knownEyeRegions[j].x, knownEyeRegions[j].y);
+				if(predict_eye_haar(candidateimg, currframe_mat, offset) || predict_eye(svm, candidateimg) == EYECLASS)
 				{
-					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
-					rectangle(currframe_mat, Point(knownEyeRegions[j].x,knownEyeRegions[j].y), 
+					//if(predict_eye_haar(candidateimg, currframe_mat, offset) && predict_eye(svm, candidateimg) == EYECLASS)
+						circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(0,255,0)), 3);
+					/*else if(predict_eye_haar(candidateimg))
+						circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(0,255,255)), 3);
+					else if(predict_eye(svm, candidateimg) == EYECLASS)
+						circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(255,0,255)), 3);
+					*/
+					/*rectangle(currframe_mat, Point(knownEyeRegions[j].x,knownEyeRegions[j].y), 
 						Point(knownEyeRegions[j].x+TIMGW,knownEyeRegions[j].y+TIMGH), 
 						CV_RGB(0,0,0),2);
+					*/
 					num_eyes++;
 					
 					// saving every circle square
@@ -463,7 +513,7 @@ int main(int argc, char *argv[])
 		/* display eyepairs */
 		for(int i = 0; i < knownEyePairs.size(); i++)
 		{
-			displayEyePair(currframe_gray, &(knownEyePairs[i]));
+			displayEyePair(currframe_gray, currframe_mat, &(knownEyePairs[i]));
 		}
 		
 
@@ -498,6 +548,9 @@ int main(int argc, char *argv[])
 		}
 
 		int keyVal = cvWaitKey(wait_time) & 255;
+		
+		/*if(keypoints.size() > 20)
+			keyVal = 'n';*/
 
 		if ( (keyVal) == 27 )
 		{
