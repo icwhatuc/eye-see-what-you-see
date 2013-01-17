@@ -185,10 +185,7 @@ void displayEyePair(Mat &img, eyepair *ep)
 	resize(trainimg, resizedpair, resizedpair.size(), 1, 1);
 	
 	if (predict_eyepair(resizedpair)) {
-		//line(img,Point(ep->firsteye.x,ep->firsteye.y),Point(ep->secondeye.x,ep->secondeye.y),CV_RGB(0,0,255),2);
-		rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
-		//imwrite(filename, trainimg);
-		//std::cout << "line at " << ep->firsteye.x << " " << ep->firsteye.y << std::endl;
+		//rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
 	}
 	paircounter++;
 }
@@ -240,22 +237,6 @@ int main(int argc, char *argv[])
 	CvSVM svm;
 	svm.load("eye_classify_withweights.svm");
 	
-	/* parameters to detect blobs of pupils */
-	SimpleBlobDetector::Params params;
-	params.minDistBetweenBlobs = 50.0f;
-	params.filterByInertia = false;
-	params.filterByConvexity = false;
-	params.filterByColor = false;
-	params.filterByCircularity = true;
-	params.filterByArea = true;
-	params.minArea = 3.0f;
-	params.maxArea = 200.0f;
-	params.minCircularity = 0.5f;
-	params.maxCircularity = 1.0f;
-	
-	Ptr<FeatureDetector> blob_detector = new 
-		SimpleBlobDetector(params);
-	blob_detector->create("SimpleBlob");
 	vector<KeyPoint> keypoints;
 
 	if (!capture)
@@ -271,6 +252,18 @@ int main(int argc, char *argv[])
 	cvNamedWindow( "thresholded_diff", CV_WINDOW_NORMAL );
 	//cvNamedWindow( "backprojection", CV_WINDOW_NORMAL );
 	
+	/* parameters to detect blobs of pupils */
+	SimpleBlobDetector::Params params;
+	params.minDistBetweenBlobs = 50.0f;
+	params.filterByInertia = false;
+	params.filterByConvexity = false;
+	params.filterByColor = false;
+	params.filterByCircularity = false;
+	params.filterByArea = true;
+	params.minArea = 3.0f;
+	params.maxArea = 200.0f;
+	params.minCircularity = 0.5f;
+	params.maxCircularity = 1.0f;
 	
 	/* Eye tracking */
 	std::vector <Rect> knownEyeRegions;
@@ -291,7 +284,6 @@ int main(int argc, char *argv[])
 	int histThreshold = (CAMWIDTH * CAMHEIGHT)*HISTTHRESHOLD;
 	int prev_num_eyes = 0;
 
-	static int haar_count, svm_count; // DEBUG
 	while (1)
 	{
 		std::vector< eyepair> knownEyePairs;
@@ -313,14 +305,7 @@ int main(int argc, char *argv[])
 		
 		diff_img = diff_copy.clone();
 		
-		//calcHist( &diff_copy, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false );
-		//calcBackProject ( &diff_copy, 1, 0, hist, backprojection, &histRange );
-		//equalizeHist(backprojection, backprojection);
-		//imshow("backprojection", backprojection);
-		//GaussianBlur( backprojection, backprojection, Size(9,9), 16, 16 );
-		
-		GaussianBlur( diff_img, diff_img, Size(9, 9), 16, 16 );
-		//equalizeHist(diff_img, diff_img);
+		GaussianBlur( diff_img, diff_img, Size(9, 9), 8, 8 );
 
 		// Find threshold based on histogram
 		calcHist(&diff_img, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false);
@@ -330,17 +315,23 @@ int main(int argc, char *argv[])
 			if (histCount > HISTTHRESHOLD)
 				break;
 		}
-		threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
+		// threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
 
 		//threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
 		imshow("difference", diff_copy);
 		imshow("thresholded_diff", diff_img);
 		
+		// Set blob thresholds
+		params.minThreshold = bin-10;
+		params.maxThreshold = bin+10;
+		params.thresholdStep = 2;
+	
+		Ptr<FeatureDetector> blob_detector = new 
+			SimpleBlobDetector(params);
+		blob_detector->create("SimpleBlob");
 		blob_detector->detect(diff_img, keypoints);
 		drawKeypoints(currframe_mat,keypoints,currframe_mat,BLUE);
 		
-		//blob_detector->detect(backprojection, keypoints);
-		//drawKeypoints(currframe_mat,keypoints,currframe_mat,BLUE);
 		
 		/* clean regionsKnown */
 		//printf("cleaning the regionsKnown information from last frame...\n");
@@ -371,14 +362,11 @@ int main(int argc, char *argv[])
 			else
 				candidateimg = prevframe_gray(candidateRegion);
 			
-
-			if(predict_eye(svm, candidateimg) == EYECLASS)
-				svm_count++; // DEBUG
-			if(predict_eye_haar(candidateimg)) // DEBUG
+//			if(predict_eye_haar(candidateimg))
+//			if(predict_eye(svm, candidateimg) == EYECLASS)
+			if(predict_eye_haar(candidateimg) || predict_eye(svm, candidateimg) == EYECLASS)
 			{
-				haar_count++;
 				num_eyes++;
-				//printf("call to isKnown\n");
 				int index;
 				
 				for(index = 0; index < knownEyeRegions.size(); index++)
@@ -400,10 +388,9 @@ int main(int argc, char *argv[])
 				circle(currframe_mat, keypoints[j].pt, 5, RED, 3);
 				
 				// saving every circle square
-				//if (recordcandidates)
+				if (recordcandidates)
 				{
-					//sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
-					sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
+					sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_red.jpg", 
 							currrunstamp_tm->tm_mon, 
 							currrunstamp_tm->tm_mday,
 							currrunstamp_tm->tm_hour,
@@ -411,16 +398,6 @@ int main(int argc, char *argv[])
 							currrunstamp_tm->tm_sec,
 							framecount,
 							j);
-					imwrite(filename, candidateimg);
-					sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_red2.jpg", 
-							currrunstamp_tm->tm_mon, 
-							currrunstamp_tm->tm_mday,
-							currrunstamp_tm->tm_hour,
-							currrunstamp_tm->tm_min,
-							currrunstamp_tm->tm_sec,
-							framecount,
-							j);
-					candidateimg = diff_img(candidateRegion); // DEBUG
 					imwrite(filename, candidateimg);
 				}
 			}
@@ -437,11 +414,10 @@ int main(int argc, char *argv[])
 				else
 					candidateimg = prevframe_gray(knownEyeRegions[j]);
 				
-				if(predict_eye(svm, candidateimg) == EYECLASS)
-					svm_count++;
-				if(predict_eye_haar(candidateimg)) // DEBUG
+				//if(predict_eye_haar(candidateimg))
+				//if(predict_eye(svm, candidateimg) == EYECLASS)
+				if(predict_eye_haar(candidateimg) || predict_eye(svm, candidateimg) == EYECLASS)
 				{
-					haar_count++;
 					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, GREEN, 3);
 					rectangle(currframe_mat, Point(knownEyeRegions[j].x,knownEyeRegions[j].y), 
 						Point(knownEyeRegions[j].x+TIMGW,knownEyeRegions[j].y+TIMGH), 
@@ -449,10 +425,9 @@ int main(int argc, char *argv[])
 					num_eyes++;
 					
 					// saving every circle square
-					//if (recordcandidates)
+					if (recordcandidates)
 					{
-						//sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
-						sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
+						sprintf(filename, "candidates/candidate%d_%d_%02d%02d%02d_%d_%d_green.jpg", 
 								currrunstamp_tm->tm_mon, 
 								currrunstamp_tm->tm_mday,
 								currrunstamp_tm->tm_hour,
@@ -460,16 +435,6 @@ int main(int argc, char *argv[])
 								currrunstamp_tm->tm_sec,
 								framecount,
 								j);
-						imwrite(filename, candidateimg);
-						sprintf(filename, "/home/icwhatuc/will/tmp/candidate%d_%d_%02d%02d%02d_%d_%d_green2.jpg", 
-								currrunstamp_tm->tm_mon, 
-								currrunstamp_tm->tm_mday,
-								currrunstamp_tm->tm_hour,
-								currrunstamp_tm->tm_min,
-								currrunstamp_tm->tm_sec,
-								framecount,
-								j);
-						candidateimg = diff_img(knownEyeRegions[j]); // DEBUG
 						imwrite(filename, candidateimg);
 					}
 					
@@ -620,7 +585,6 @@ int main(int argc, char *argv[])
 		flip(arduino_state);	
 		
 	}
-	std::cout << svm_count << " (svm) / " << haar_count << " (haar)";
 
 	// Release the capture device housekeeping
 	cvReleaseCapture( &capture );
