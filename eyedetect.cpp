@@ -14,7 +14,7 @@
 
 #define EXPECTEDFPS	30
 
-#define HISTTHRESHOLD 0.001
+#define HISTTHRESHOLD 0.0001
 #define COLOUR		255
 
 #define USECSPERSEC		1000000
@@ -123,10 +123,10 @@ bool predict_eye_haar(Mat &img, Mat &coloredimg, Point &offset) {
 		rectangle(coloredimg, Point(eyes[i].x + offset.x,eyes[i].y + offset.y), Point(eyes[i].x + eyes[i].width + offset.x, eyes[i].y + eyes[i].height + offset.y), 
 			CV_RGB(255,255,51),2);
 	
-	return eyes.size() == 1;
+	return eyes.size() > 0;
 }
 
-bool predict_eyepair(Mat &img) {
+bool predict_eyepair(Mat &img, Mat &coloredimg, Point &offset) {
 	//struct timeval start, end;
 	//long mtime, seconds, useconds;
 	//gettimeofday(&start, NULL);
@@ -138,12 +138,17 @@ bool predict_eyepair(Mat &img) {
     Mat img_mat;
 	std::vector<Rect> eyepairs;
 	equalizeHist(img,img_mat);
-	cascade.detectMultiScale(img_mat, eyepairs, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING, Size(50,20) );
+	cascade.detectMultiScale(img_mat, eyepairs, 1.2, 2, CV_HAAR_DO_CANNY_PRUNING, Size(60,20) );
 	//gettimeofday(&end, NULL);
 	//seconds  = end.tv_sec  - start.tv_sec;
     //useconds = end.tv_usec - start.tv_usec;
     //mtime = ((seconds) * 1000 + useconds/1000.0) + 0.5;
 	//printf("Elapsed time: %ld milliseconds\n", mtime);
+	for(int i = 0 ; i < eyepairs.size(); i++) {
+		rectangle(coloredimg, Point(eyepairs[i].x + offset.x,eyepairs[i].y + offset.y), Point(eyepairs[i].x + eyepairs[i].width + offset.x, eyepairs[i].y + eyepairs[i].height + offset.y), 
+			CV_RGB(0,0,255),2);
+		break;
+	}
 	return eyepairs.size() == 1;
 }
 
@@ -190,7 +195,9 @@ void displayEyePair(Mat &img, Mat &coloredimg, eyepair *ep)
 	Mat resizedpair(TIMGW, TIMGW*2, CV_8UC1);
 	resize(trainimg, resizedpair, resizedpair.size(), 1, 1);
 	
-	if (predict_eyepair(resizedpair)) {
+	Point offset(x,y);
+	//if (predict_eyepair(resizedpair,coloredimg,offset)) {
+	if (predict_eyepair(trainimg,coloredimg,offset)) {
 		int pxdist = (int)sqrt(pow(ep->firsteye.x-ep->secondeye.x, 2) + pow(ep->firsteye.y - ep->secondeye.y, 2));
 		
 		char eyepairinfo[100];
@@ -201,7 +208,7 @@ void displayEyePair(Mat &img, Mat &coloredimg, eyepair *ep)
 			ep->secondeye.y, 
 			pxdist);
 	
-		rectangle(coloredimg, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
+		//rectangle(coloredimg, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
 		putText(coloredimg, eyepairinfo, Point(x,y-50), FONT_HERSHEY_COMPLEX_SMALL,
 			1, RED, 1, CV_AA);
 	}
@@ -265,10 +272,10 @@ int main(int argc, char *argv[])
 	}
 
 	/* Create windows in which the captured images will be presented */
-	cvNamedWindow( "difference", CV_WINDOW_NORMAL );
-	cvNamedWindow( "currframe_mat", CV_WINDOW_NORMAL);
-	cvNamedWindow( "thresholded_diff", CV_WINDOW_NORMAL );
-	//cvNamedWindow( "backprojection", CV_WINDOW_NORMAL );
+	cvNamedWindow("difference", CV_WINDOW_NORMAL);
+	cvNamedWindow("currframe_mat", CV_WINDOW_NORMAL);
+	cvNamedWindow("thresholded_diff", CV_WINDOW_NORMAL);
+	//cvNamedWindow("backprojection", CV_WINDOW_NORMAL);
 	
 	/* parameters to detect blobs of pupils */
 	SimpleBlobDetector::Params params;
@@ -278,7 +285,7 @@ int main(int argc, char *argv[])
 	params.filterByColor = false;
 	params.filterByCircularity = true;
 	params.filterByArea = true;
-	params.minArea = 3.0f;
+	params.minArea = 5.0f;
 	params.maxArea = 200.0f;
 	params.minCircularity = 0.5f;
 	params.maxCircularity = 1.0f;
@@ -330,10 +337,10 @@ int main(int argc, char *argv[])
 		int histCount = 0, bin;
 		for (bin = HISTSIZE; bin > 0; bin--) {
 			histCount += hist.at<float>(bin);
-			if (histCount > HISTTHRESHOLD)
+			if (histCount > histThreshold)
 				break;
 		}
-		//threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
+		threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
 
 		//threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
 		
