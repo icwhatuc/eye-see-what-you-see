@@ -15,7 +15,7 @@
 
 #define USECSPERSEC		1000000
 #define USECSPERMSEC	1000
-#define EXPCTDFTM		33333		// @ 20 fps -> 50000 microsecond between each frame
+#define EXPCTDFTM		50000		// @ 20 fps -> 50000 microsecond between each frame
 
 #define SHOWPREVCURR	0
 
