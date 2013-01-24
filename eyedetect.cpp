@@ -32,8 +32,8 @@
 #define TIMGW		75		// width of training images
 #define TIMGH		75		// height of training images
 
-#define CAMWIDTH	640//1920
-#define CAMHEIGHT	480//1080
+#define CAMWIDTH	1920
+#define CAMHEIGHT	1080
 
 #define EYECLASS	1
 #define NONEYECLASS	-1
@@ -50,8 +50,6 @@ using namespace cv;
 
 time_t t, currrunstamp;
 struct tm * now, *currrunstamp_tm;
-
-int eyedetect(CvCapture *capture);
 
 int isInRect(Point2f &pt, Rect &r)
 {
@@ -94,10 +92,6 @@ float predict_eye(CvSVM &svm, Mat &img_mat_orig)
 }
 
 #define overlap(r1,r2) ((r1 & r2).size().area() > (TIMGW*TIMGH)/20)
-//bool overlap(Rect &region1, Rect &region2)
-//{
-	//return (region1 & region2).size().area() > TIMGW/2;
-//}
 
 int isKnown(Rect &region, std::vector<Rect> &regionlist)
 {
@@ -129,9 +123,6 @@ bool predict_eye_haar(Mat &img, Mat &coloredimg, Point &offset) {
 }
 
 bool predict_eyepair(Mat &img, Mat &coloredimg, Point &offset) {
-	//struct timeval start, end;
-	//long mtime, seconds, useconds;
-	//gettimeofday(&start, NULL);
 	static CascadeClassifier cascade;
 	if (cascade.empty() && !cascade.load("cascades/haarcascade_eyepair.xml")) {
 		fprintf(stderr, "ERROR: could not load haar cascade xml for eye pairs\n");
@@ -141,11 +132,7 @@ bool predict_eyepair(Mat &img, Mat &coloredimg, Point &offset) {
 	std::vector<Rect> eyepairs;
 	equalizeHist(img,img_mat);
 	cascade.detectMultiScale(img_mat, eyepairs, 1.2, 2, CV_HAAR_DO_CANNY_PRUNING, Size(60,20) );
-	//gettimeofday(&end, NULL);
-	//seconds  = end.tv_sec  - start.tv_sec;
-    //useconds = end.tv_usec - start.tv_usec;
-    //mtime = ((seconds) * 1000 + useconds/1000.0) + 0.5;
-	//printf("Elapsed time: %ld milliseconds\n", mtime);
+
 	for(int i = 0 ; i < eyepairs.size(); i++) {
 		rectangle(coloredimg, Point(eyepairs[i].x + offset.x,eyepairs[i].y + offset.y), Point(eyepairs[i].x + eyepairs[i].width + offset.x, eyepairs[i].y + eyepairs[i].height + offset.y), 
 			CV_RGB(0,0,255),2);
@@ -182,23 +169,12 @@ void displayEyePair(Mat &img, Mat &coloredimg, eyepair *ep)
 		y1 = ep->firsteye.y + ep->firsteye.height;
 	}
 	
-	//rectangle(img, Point(x,y), Point(x1,y1), CV_RGB(0,0,0),2);
-	
 	Mat trainimg = img(Rect(x, y, x1-x, y1-y));
 	
-	/*sprintf(filename, "/home/icwhatuc/will/tmp/paircandidate%d_%d_%02d%02d%02d_%d.jpg", 
-		currrunstamp_tm->tm_mon, 
-		currrunstamp_tm->tm_mday,
-		currrunstamp_tm->tm_hour,
-		currrunstamp_tm->tm_min,
-		currrunstamp_tm->tm_sec,
-		paircounter);
-	*/
 	Mat resizedpair(TIMGW, TIMGW*2, CV_8UC1);
 	resize(trainimg, resizedpair, resizedpair.size(), 1, 1);
 	
 	Point offset(x,y);
-	//if (predict_eyepair(resizedpair,coloredimg,offset)) {
 	if (predict_eyepair(trainimg,coloredimg,offset)) {
 		int pxdist = (int)sqrt(pow(ep->firsteye.x-ep->secondeye.x, 2) + pow(ep->firsteye.y - ep->secondeye.y, 2));
 		
@@ -225,12 +201,6 @@ int main(int argc, char *argv[])
 		capture = cvCaptureFromCAM( CV_CAP_ANY );
 	else
 		capture = cvCaptureFromFile( argv[1] );
-	eyedetect(capture);
-	return 0;
-}
-	
-int eyedetect(CvCapture *capture)
-{
 	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, CAMWIDTH);
 	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, CAMHEIGHT);
 	
@@ -288,15 +258,15 @@ int eyedetect(CvCapture *capture)
 	/* parameters to detect blobs of pupils */
 	SimpleBlobDetector::Params params;
 	params.minDistBetweenBlobs = 50.0f;
-	params.filterByInertia = true;
+	params.filterByInertia = false;
 	params.filterByConvexity = false;
 	params.filterByColor = false;
 	params.filterByCircularity = true;
 	params.filterByArea = true;
-	params.minArea = 5.0f;
+	params.minArea = 4.0f;
 	params.maxArea = 200.0f;
-	params.minCircularity = 0.5f;
-	params.maxCircularity = 1.0f;
+	params.minCircularity = 0.3f;
+	//params.maxCircularity = 1.0f;
 	
 	/* Eye tracking */
 	std::vector <Rect> knownEyeRegions;
@@ -317,13 +287,8 @@ int eyedetect(CvCapture *capture)
 	int histThreshold = (CAMWIDTH * CAMHEIGHT)*HISTTHRESHOLD;
 	int prev_num_eyes = 0;
 
-	struct timeval start, end;
-	long mtime, seconds, useconds;
-
 	while (1)
 	{
-		gettimeofday(&start, NULL);
-
 		std::vector< eyepair> knownEyePairs;
 		arduino << arduino_state;
 		arduino.flush();
@@ -331,27 +296,11 @@ int eyedetect(CvCapture *capture)
 		
 		currframe = cvQueryFrame(capture);
 		
-				
-		// *** for timing purposes
-		gettimeofday(&end, NULL);
-		
 		if(!currframe)
 			break;
 		
 		currframe_mat = currframe;
-		
-		/* view the 3 channels */
-		/*
-		Mat curr_chs[3];
-		
-		split(currframe_mat, curr_chs);
-		imshow("redchannel", curr_chs[0]);
-		imshow("greenchannel", curr_chs[1]);
-		imshow("bluechannel", curr_chs[2]);
-		
 		currframe_matcopy = currframe_mat.clone();
-		currframe_gray = curr_chs[0];
-		*/
 		
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
@@ -359,9 +308,8 @@ int eyedetect(CvCapture *capture)
 		
 		diff_img = diff_copy.clone();
 		
-		//GaussianBlur( diff_img, diff_img, Size(9, 9), 8, 8 );
-
-		
+		//GaussianBlur(diff_img, diff_img, Size(9, 9), 8, 8);
+		blur(diff_img, diff_img, Size(3, 3), Point(-1,-1));
 
 		// Find threshold based on histogram
 		calcHist(&diff_img, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false);
@@ -375,23 +323,14 @@ int eyedetect(CvCapture *capture)
 
 		//threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
 		
-		/*
-		for (int i = 0; i<diff_copy.rows; i++) {
-			for (int j = 0; j < diff_copy.cols; j++) {
-				int scale = 5;
-				diff_copy.at<uchar>(i,j) = (diff_copy.at<uchar>(i,j)*scale > 255)?255:
-					diff_copy.at<uchar>(i,j)*scale;
-			}
-		}
-		*/
-		
+
 		imshow("difference", diff_copy);
 		imshow("thresholded_diff", diff_img);
 		
 		// Set blob thresholds
-		params.minThreshold = bin-8;
-		params.maxThreshold = bin+8;
-		params.thresholdStep = 2;
+		params.minThreshold = bin-1;
+		params.maxThreshold = bin+1;
+		params.thresholdStep = 1;
 	
 		Ptr<FeatureDetector> blob_detector = new 
 			SimpleBlobDetector(params);
@@ -409,7 +348,6 @@ int eyedetect(CvCapture *capture)
 		}
 		
 		int num_eyes = 0;
-		
 		//printf("checking out each keyPoint and verifying last known regions...\n");
 		for (j = 0; j < keypoints.size(); j++)
 		{
@@ -430,8 +368,6 @@ int eyedetect(CvCapture *capture)
 			else
 				candidateimg = prevframe_gray(candidateRegion);
 			
-//			if(predict_eye_haar(candidateimg))
-//			if(predict_eye(svm, candidateimg) == EYECLASS)
 			Point offset(candidateRegion.x, candidateRegion.y);
 			if(predict_eye_haar(candidateimg, currframe_mat, offset) || predict_eye(svm, candidateimg) == EYECLASS)
 			{
@@ -454,7 +390,8 @@ int eyedetect(CvCapture *capture)
 					regionsKnown.push_back(true);
 				}
 				
-				circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 8, (CV_RGB(255,0,0)), 3);
+				circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(255,0,0)), 3);
+
 				// saving every circle square
 				if (recordcandidates)
 				{
@@ -486,6 +423,7 @@ int eyedetect(CvCapture *capture)
 				if(predict_eye_haar(candidateimg, currframe_mat, offset) || predict_eye(svm, candidateimg) == EYECLASS)
 				{
 					circle(currframe_mat, centerOfRect(knownEyeRegions[j]), 5, (CV_RGB(0,255,0)), 3);
+
 					num_eyes++;
 					
 					// saving every circle square
@@ -511,7 +449,6 @@ int eyedetect(CvCapture *capture)
 		}
 		
 		int numberofeyes = regionsKnown.size();
-		
 		
 		/* pairing eyes */
 		for(int i1 = 0; i1 < numberofeyes-1; i1++)
@@ -651,14 +588,6 @@ int eyedetect(CvCapture *capture)
 		
 		framecount++;
 		flip(arduino_state);	
-
-	
-		seconds  = end.tv_sec  - start.tv_sec;
-    	useconds = end.tv_usec - start.tv_usec;
-    
-    	mtime = ((seconds) * 1000 + useconds/1000.0) + 0.5;
-    
-		printf("Elapsed time: %ld milliseconds\n", mtime);
 		
 	}
 

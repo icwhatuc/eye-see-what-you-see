@@ -4,7 +4,7 @@ LIBS = `pkg-config --libs opencv`
 %: %.cpp
 	g++ $(CFLAGS) -o $@ $< $(LIBS)
 
-webcam: webcam.cpp
+eyedetect: eyedetect.cpp
 	g++ $(CFLAGS) -o $@ $< $(LIBS)
 
 clean:

@@ -192,7 +192,7 @@ int main()
 			{
 				captureFlag=true;
 				if (DEBUGON) printf("video is now on\n");
-				record = new VideoWriter("control_will2.avi", CV_FOURCC('M','J','P','G'), 30, currframe_mat.size(), true);
+				record = new VideoWriter("control_will3.avi", CV_FOURCC('M','J','P','G'), 30, currframe_mat.size(), true);
 				if( !record->isOpened() ) {
 					printf("VideoWriter failed to open!\n");
 				}
