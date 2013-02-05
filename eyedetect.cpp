@@ -5,11 +5,11 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <ctime>
 #include <ml.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <cmath>
+#include "opencv2/gpu/gpu.hpp"
 #include "eyepair.h"
 
 #define EXPECTEDFPS	30
@@ -47,6 +47,7 @@
 #define centerOfRect(R)	(Point(R.x + R.width/2, R.y + R.height/2))
 
 using namespace cv;
+using namespace std;
 
 time_t t, currrunstamp;
 struct tm * now, *currrunstamp_tm;
@@ -58,6 +59,24 @@ int isInRect(Point2f &pt, Rect &r)
 		return 1;
 
 	return 0;
+}
+
+void timing(bool start, string what="") {
+	static struct timeval starttime, endtime;
+	static long mtime, seconds, useconds;
+	if (start) {
+		gettimeofday(&starttime, NULL);
+		cout << "timing " << what << endl;
+	}
+	else {
+		gettimeofday(&endtime, NULL);
+		seconds  = endtime.tv_sec  - starttime.tv_sec;
+		useconds = endtime.tv_usec - starttime.tv_usec;
+
+		mtime = ((seconds) * 1000 + useconds/1000.0) + 0.5;
+
+		printf("Elapsed time: %ld milliseconds\n", mtime);
+	}
 }
 
 float predict_eye(CvSVM &svm, Mat &img_mat_orig)
@@ -114,11 +133,11 @@ bool predict_eye_haar(Mat &img, Mat &coloredimg, Point &offset) {
 	std::vector<Rect> eyes;
 	equalizeHist(img,img_mat);
 	cascade.detectMultiScale(img_mat, eyes, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING, Size(20,20) );
-	
+	/*
 	for(int i = 0 ; i < eyes.size(); i++)
 		rectangle(coloredimg, Point(eyes[i].x + offset.x,eyes[i].y + offset.y), Point(eyes[i].x + eyes[i].width + offset.x, eyes[i].y + eyes[i].height + offset.y), 
 			CV_RGB(255,255,51),2);
-	
+	*/
 	return eyes.size() > 0;
 }
 
@@ -132,12 +151,12 @@ bool predict_eyepair(Mat &img, Mat &coloredimg, Point &offset) {
 	std::vector<Rect> eyepairs;
 	equalizeHist(img,img_mat);
 	cascade.detectMultiScale(img_mat, eyepairs, 1.2, 2, CV_HAAR_DO_CANNY_PRUNING, Size(60,20) );
-
+	/*
 	for(int i = 0 ; i < eyepairs.size(); i++) {
 		rectangle(coloredimg, Point(eyepairs[i].x + offset.x,eyepairs[i].y + offset.y), Point(eyepairs[i].x + eyepairs[i].width + offset.x, eyepairs[i].y + eyepairs[i].height + offset.y), 
 			CV_RGB(0,0,255),2);
 		break;
-	}
+	}*/
 	return eyepairs.size() == 1;
 }
 
@@ -266,7 +285,7 @@ int main(int argc, char *argv[])
 	params.minArea = 4.0f;
 	params.maxArea = 200.0f;
 	params.minCircularity = 0.3f;
-	//params.maxCircularity = 1.0f;
+	params.maxCircularity = 1.0f;
 	
 	/* Eye tracking */
 	std::vector <Rect> knownEyeRegions;
@@ -287,6 +306,7 @@ int main(int argc, char *argv[])
 	int histThreshold = (CAMWIDTH * CAMHEIGHT)*HISTTHRESHOLD;
 	int prev_num_eyes = 0;
 
+	//gpu::GpuMat gpu_diff, gpu_thresh;
 	while (1)
 	{
 		std::vector< eyepair> knownEyePairs;
@@ -304,13 +324,16 @@ int main(int argc, char *argv[])
 		
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
 		
-		absdiff(prevframe_gray, currframe_gray, diff_copy);
+		absdiff(currframe_gray, prevframe_gray, diff_copy);
 		
 		diff_img = diff_copy.clone();
+		//timing(true,"gpu upload");
+		//gpu_diff.upload(diff_img);
+		//timing(false);
 		
 		//GaussianBlur(diff_img, diff_img, Size(9, 9), 8, 8);
 		blur(diff_img, diff_img, Size(3, 3), Point(-1,-1));
-
+		
 		// Find threshold based on histogram
 		calcHist(&diff_img, 1, 0, Mat(), hist, 1, &bins, &histRange, true, false);
 		int histCount = 0, bin;
@@ -320,9 +343,9 @@ int main(int argc, char *argv[])
 				break;
 		}
 		threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
-
-		//threshold(diff_img, diff_img,THRESHOLD,255,CV_THRESH_BINARY);
-		
+		//timing(true,"gpu threshold");
+		//gpu::threshold(gpu_diff,gpu_thresh,bin,255,CV_THRESH_BINARY); // assumes 256 bins
+		//timing(false);
 
 		imshow("difference", diff_copy);
 		imshow("thresholded_diff", diff_img);
@@ -596,4 +619,5 @@ int main(int argc, char *argv[])
 	cvDestroyWindow( "mywindow" );
 	return 0;
 }
+
 
