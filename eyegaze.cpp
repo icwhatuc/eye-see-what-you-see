@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <list>
 #include <ml.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -93,7 +94,8 @@ int main(int argc, const char *argv[])
 	params.minCircularity = 0.3f;
 	params.maxCircularity = 1.0f;
 	params.thresholdStep = 1;
-	vector<KeyPoint> keypoints;
+	vector<KeyPoint> keypoints; 
+	list<KeyPoint> prev_blobs, curr_blobs;
 
 	// Histogram-related constants
 	const int histThresholdPixels = CAM_WIDTH*CAM_HEIGHT*HIST_THRESHOLD;
@@ -144,10 +146,23 @@ int main(int argc, const char *argv[])
 		drawKeypoints(mat_currframe,keypoints,mat_currframe,CV_RGB(0,0,255));
 
 		// Iterate through keypoints and check using SVM and Haar cascades
-		for (int blob_num=0; blob_num<keypoints.size(); blob_num++) {
+		bool svm_detected, haar_detected;
+		swap(curr_blobs, prev_blobs);
+		curr_blobs.clear();
+		for (int curr_blob=0; curr_blob<keypoints.size(); curr_blob++) {
+			// Check if current keypoint overlaps with previously known ones
+			for (list<KeyPoint>::iterator it = prev_blobs.begin();
+			     it != prev_blobs.end(); ) 
+			{
+				if (pointsOverlap(it->pt, keypoints[curr_blob].pt))
+					it = prev_blobs.erase(it);
+				else
+					it++;
+			}
+
 			// Top left corner of square region
-			int x = keypoints[blob_num].pt.x - SVM_IMG_SIZE/2;
-			int y = keypoints[blob_num].pt.y - SVM_IMG_SIZE/2;
+			int x = keypoints[curr_blob].pt.x - SVM_IMG_SIZE/2;
+			int y = keypoints[curr_blob].pt.y - SVM_IMG_SIZE/2;
 			if (x < 0 || y < 0 || 
 				x + SVM_IMG_SIZE >= CAM_WIDTH ||
 				y + SVM_IMG_SIZE >= CAM_HEIGHT)
@@ -158,8 +173,11 @@ int main(int argc, const char *argv[])
 			gpu::GpuMat candidate_img(mat_candidate_img);
 
 			// SVM
-			bool svmDetected = svmEyeClassify(svm,mat_candidate_img);
-			if (svmDetected) {
+			Rect eye_rect = haarEyeClassify(eye_cascade,candidate_img);
+			bool haar_detected = eye_rect.area() > 1;
+			bool svm_detected = svmEyeClassify(svm,mat_candidate_img);
+
+			if (svm_detected) {
 				// Draw circle for SVM
 				circle(
 					mat_currframe, 
@@ -169,9 +187,7 @@ int main(int argc, const char *argv[])
 			}
 
 			// Haar
-			Rect eye_rect = haarEyeClassify(eye_cascade,candidate_img);
-			bool haarDetected = eye_rect.area() > 1;
-			if (haarDetected) {
+			if (haar_detected) {
 				// Draw rectangle for Haar
 				rectangle(
 					mat_currframe,
@@ -180,6 +196,22 @@ int main(int argc, const char *argv[])
 					CV_RGB(255,255,51), 2
 				);
 			}
+
+			if (svm_detected || haar_detected)
+				curr_blobs.push_back(keypoints[curr_blob]);
+		}
+
+		// Use optical flow to track blobs from previous frame
+		for (list<KeyPoint>::iterator it = prev_blobs.begin();
+			 it != prev_blobs.end(); it++) 
+		{
+			int x = it->pt.x;
+			int y = it->pt.y;
+			circle(
+				mat_currframe, 
+				Point(x, y), 
+				5, CV_RGB(0,255,0), 3
+			);
 		}
 
 		// Show images
@@ -200,10 +232,10 @@ int main(int argc, const char *argv[])
 }
 
 bool pointsOverlap(Point2f &p1, Point2f &p2) {
-	int x = p1.x - SVM_IMG_HEIGHT/2;
-	int y = p1.y - SVM_IMG_HEIGHT/2;
-	return (p2.x < (x+SVM_IMG_HEIGHT) && p2.x > x
-		&& p2.y < (y+SVM_IMG_HEIGHT) && p2.y > y);
+	int x = p1.x - SVM_IMG_SIZE/2;
+	int y = p1.y - SVM_IMG_SIZE/2;
+	return (p2.x < (x+SVM_IMG_SIZE) && p2.x > x
+		&& p2.y < (y+SVM_IMG_SIZE) && p2.y > y);
 }
 
 void timing(bool start, string what) {
