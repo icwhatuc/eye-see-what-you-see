@@ -54,16 +54,18 @@ int main(int argc, const char *argv[])
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT);
 	
 	// Initialize matrix objects
-	gpu::GpuMat prevframe(CAM_WIDTH, CAM_HEIGHT, CV_8UC3), 
-				prevframe_gray(CAM_WIDTH, CAM_HEIGHT, CV_8UC1), 
-				currframe(CAM_WIDTH, CAM_HEIGHT, CV_8UC3),
-				currframe_gray(CAM_WIDTH, CAM_HEIGHT, CV_8UC1),
+	gpu::GpuMat frame1, 
+				frame1_gray, 
+				frame2,
+				frame2_gray,
+				frame2_gray_prev,
 				diff_img, thresh_img,
-				hist(1,256,CV_32SC1);
-	Mat mat_prevframe(CAM_WIDTH, CAM_HEIGHT, CV_8UC3),
-		mat_prevframe_gray(CAM_WIDTH, CAM_HEIGHT, CV_8UC1),
-		mat_currframe(CAM_WIDTH, CAM_HEIGHT, CV_8UC3),
-		mat_currframe_gray(CAM_WIDTH, CAM_HEIGHT, CV_8UC1),
+				hist;
+	Mat mat_frame1,
+		mat_frame1_gray,
+		mat_frame2,
+		mat_frame2_gray,
+		mat_frame2_gray_prev,
 		mat_diff, mat_thresh, mat_hist;
 
 	// SVM
@@ -104,25 +106,34 @@ int main(int argc, const char *argv[])
 	int bins = HIST_BINS;
 	int hist_count, thresh_bin;
 
+	// Optical flow
+	gpu::PyrLKOpticalFlow optflow;
+	//optflow.useInitialFlow = true;
+	Mat optflow_prev_mat, optflow_next_mat, optflow_status_mat;
+	gpu::GpuMat optflow_prev, optflow_next, optflow_status;
+
 	// Display windows
 	cvNamedWindow(W_COLOR, CV_WINDOW_NORMAL);
 	cvNamedWindow(W_DIFF, CV_WINDOW_NORMAL);
 	cvNamedWindow(W_THRESH, CV_WINDOW_NORMAL);
 
+	capture >> mat_frame2;
+	frame2.upload(mat_frame2);
+	gpu::cvtColor(frame2, frame2_gray_prev, CV_BGR2GRAY);
 	for(;;) {
 		timing(true,"loop");
 		// Grab two consecutive frames, convert to grayscale
-		capture >> mat_prevframe;
-		prevframe.upload(mat_prevframe);
-		gpu::cvtColor(prevframe, prevframe_gray, CV_BGR2GRAY);
+		capture >> mat_frame1;
+		frame1.upload(mat_frame1);
+		gpu::cvtColor(frame1, frame1_gray, CV_BGR2GRAY);
 		
-		capture >> mat_currframe;
-		currframe.upload(mat_currframe);
-		gpu::cvtColor(currframe, currframe_gray, CV_BGR2GRAY);
-		currframe_gray.download(mat_currframe_gray);
+		capture >> mat_frame2;
+		frame2.upload(mat_frame2);
+		gpu::cvtColor(frame2, frame2_gray, CV_BGR2GRAY);
+		frame2_gray.download(mat_frame2_gray);
 		
 		// Obtain difference image and blur
-		gpu::absdiff(currframe_gray, prevframe_gray, diff_img);
+		gpu::absdiff(frame2_gray, frame1_gray, diff_img);
 		//gpu::blur(diff_img, diff_img, Size(3, 3), Point(-1,-1));
 
 		// Find threshold based on histogram
@@ -143,7 +154,7 @@ int main(int argc, const char *argv[])
 		blob_detector->create("SimpleBlob");
 		diff_img.download(mat_diff); // Blob detect doesn't work on GpuMat objects
 		blob_detector->detect(mat_diff, keypoints);
-		drawKeypoints(mat_currframe,keypoints,mat_currframe,CV_RGB(0,0,255));
+		drawKeypoints(mat_frame2,keypoints,mat_frame2,CV_RGB(0,0,255));
 
 		// Iterate through keypoints and check using SVM and Haar cascades
 		bool svm_detected, haar_detected;
@@ -169,7 +180,7 @@ int main(int argc, const char *argv[])
 				continue;
 
 			Rect candidate_region(x, y, SVM_IMG_SIZE, SVM_IMG_SIZE);
-			Mat mat_candidate_img = mat_currframe_gray(candidate_region);
+			Mat mat_candidate_img = mat_frame2_gray(candidate_region);
 			gpu::GpuMat candidate_img(mat_candidate_img);
 
 			// SVM
@@ -180,7 +191,7 @@ int main(int argc, const char *argv[])
 			if (svm_detected) {
 				// Draw circle for SVM
 				circle(
-					mat_currframe, 
+					mat_frame2, 
 					Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
 					5, CV_RGB(255,0,0), 3
 				);
@@ -190,7 +201,7 @@ int main(int argc, const char *argv[])
 			if (haar_detected) {
 				// Draw rectangle for Haar
 				rectangle(
-					mat_currframe,
+					mat_frame2,
 					Point(x+eye_rect.x, y+eye_rect.y),
 					Point(x+eye_rect.width+eye_rect.x, y+eye_rect.height+eye_rect.y),
 					CV_RGB(255,255,51), 2
@@ -202,20 +213,53 @@ int main(int argc, const char *argv[])
 		}
 
 		// Use optical flow to track blobs from previous frame
+		optflow_prev_mat.create(1,prev_blobs.size(),CV_32FC2);
+		int blob_num = 0;
 		for (list<KeyPoint>::iterator it = prev_blobs.begin();
-			 it != prev_blobs.end(); it++) 
+			 it != prev_blobs.end(); it++, blob_num++) 
 		{
-			int x = it->pt.x;
-			int y = it->pt.y;
+			optflow_prev_mat.at<Vec2f>(0,blob_num)[0] = it->pt.x;
+			optflow_prev_mat.at<Vec2f>(0,blob_num)[1] = it->pt.y;
+		}
+		optflow_prev.upload(optflow_prev_mat);
+		optflow.sparse(
+			frame2_gray_prev,
+			frame1_gray,
+			optflow_prev,
+			optflow_next,
+			optflow_status
+		);
+		swap(optflow_prev,optflow_next);
+		optflow.sparse(
+			frame1_gray,
+			frame2_gray,
+			optflow_prev,
+			optflow_next,
+			optflow_status
+		);
+		swap(optflow_prev,optflow_next);
+		optflow_next.download(optflow_next_mat);
+		optflow_status.download(optflow_status_mat);
+		swap(frame2_gray, frame2_gray_prev);
+
+		blob_num = 0;
+		for (list<KeyPoint>::iterator it = prev_blobs.begin();
+			 it != prev_blobs.end(); it++, blob_num++) 
+		{
+			if (!optflow_status_mat.at<uchar>(0,blob_num)) 
+				continue;
+			curr_blobs.push_back(*it);
+			int x = optflow_next_mat.at<Vec2f>(0,blob_num)[0];
+			int y = optflow_next_mat.at<Vec2f>(0,blob_num)[1];
 			circle(
-				mat_currframe, 
+				mat_frame2, 
 				Point(x, y), 
 				5, CV_RGB(0,255,0), 3
 			);
 		}
 
 		// Show images
-		imshow(W_COLOR,mat_currframe);
+		imshow(W_COLOR,mat_frame2);
 		imshow(W_DIFF,mat_diff);
 		thresh_img.download(mat_thresh);
 		imshow(W_THRESH,mat_thresh);
