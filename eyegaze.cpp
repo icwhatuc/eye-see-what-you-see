@@ -4,8 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <vector>
 #include <iostream>
-#include <list>
 #include <ml.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -96,8 +96,7 @@ int main(int argc, const char *argv[])
 	params.minCircularity = 0.3f;
 	params.maxCircularity = 1.0f;
 	params.thresholdStep = 1;
-	vector<KeyPoint> keypoints; 
-	list<KeyPoint> prev_blobs, curr_blobs;
+	vector<KeyPoint> keypoints, prev_blobs, curr_blobs;
 
 	// Histogram-related constants
 	const int histThresholdPixels = CAM_WIDTH*CAM_HEIGHT*HIST_THRESHOLD;
@@ -106,11 +105,10 @@ int main(int argc, const char *argv[])
 	int bins = HIST_BINS;
 	int hist_count, thresh_bin;
 
-	// Optical flow
-	gpu::PyrLKOpticalFlow optflow;
-	//optflow.useInitialFlow = true;
-	Mat optflow_prev_mat, optflow_next_mat, optflow_status_mat;
-	gpu::GpuMat optflow_prev, optflow_next, optflow_status;
+	// Optical flow stuff
+	std::vector<Point2f> optflow_prev, optflow_curr;
+	std::vector<uchar> optflow_status;
+	std::vector<float> optflow_err;
 
 	// Display windows
 	cvNamedWindow(W_COLOR, CV_WINDOW_NORMAL);
@@ -121,7 +119,6 @@ int main(int argc, const char *argv[])
 	frame2.upload(mat_frame2);
 	gpu::cvtColor(frame2, frame2_gray_prev, CV_BGR2GRAY);
 	for(;;) {
-		timing(true,"loop");
 		// Grab two consecutive frames, convert to grayscale
 		capture >> mat_frame1;
 		frame1.upload(mat_frame1);
@@ -131,9 +128,12 @@ int main(int argc, const char *argv[])
 		frame2.upload(mat_frame2);
 		gpu::cvtColor(frame2, frame2_gray, CV_BGR2GRAY);
 		frame2_gray.download(mat_frame2_gray);
-		
+
 		// Obtain difference image and blur
 		gpu::absdiff(frame2_gray, frame1_gray, diff_img);
+		diff_img.download(mat_diff);
+		blur(mat_diff, mat_diff, Size(3, 3), Point(-1,-1));
+		diff_img.upload(mat_diff);
 		//gpu::blur(diff_img, diff_img, Size(3, 3), Point(-1,-1));
 
 		// Find threshold based on histogram
@@ -156,21 +156,45 @@ int main(int argc, const char *argv[])
 		blob_detector->detect(mat_diff, keypoints);
 		drawKeypoints(mat_frame2,keypoints,mat_frame2,CV_RGB(0,0,255));
 
-		// Iterate through keypoints and check using SVM and Haar cascades
-		bool svm_detected, haar_detected;
-		swap(curr_blobs, prev_blobs);
 		curr_blobs.clear();
+		optflow_curr.clear();
+		optflow_prev.clear();
+
+		// Update positions of previous blobs with optical flow
+		if (prev_blobs.size() > 0) {
+			vector<KeyPoint>::iterator it;
+			for (it = prev_blobs.begin(); it != prev_blobs.end(); it++) 
+				optflow_prev.push_back(it->pt);
+
+			calcOpticalFlowPyrLK(
+				mat_frame2_gray_prev, mat_frame2_gray, 
+				optflow_prev, optflow_curr,
+				optflow_status, optflow_err
+			);
+		}
+
+		int keypoints_size_orig = keypoints.size();
 		for (int curr_blob=0; curr_blob<keypoints.size(); curr_blob++) {
 			// Check if current keypoint overlaps with previously known ones
-			for (list<KeyPoint>::iterator it = prev_blobs.begin();
-			     it != prev_blobs.end(); ) 
-			{
-				if (pointsOverlap(it->pt, keypoints[curr_blob].pt))
-					it = prev_blobs.erase(it);
-				else
+			vector<Point2f>::iterator it;
+			for (it = optflow_curr.begin(); it != optflow_curr.end();) {
+				// If no overlap, add to current frame's keypoints
+				if (pointsOverlap(*it, keypoints[curr_blob].pt))
+					it = optflow_curr.erase(it);
+				else 
 					it++;
 			}
+		}
+		for (vector<Point2f>::iterator it = optflow_curr.begin(); 
+			it != optflow_curr.end(); it++) 
+		{
+			KeyPoint k(*it,0);
+			keypoints.push_back(k);
+		}
 
+		// Iterate through keypoints and check using SVM and Haar cascades
+		bool svm_detected, haar_detected;
+		for (int curr_blob=0; curr_blob<keypoints.size(); curr_blob++) {
 			// Top left corner of square region
 			int x = keypoints[curr_blob].pt.x - SVM_IMG_SIZE/2;
 			int y = keypoints[curr_blob].pt.y - SVM_IMG_SIZE/2;
@@ -190,11 +214,18 @@ int main(int argc, const char *argv[])
 
 			if (svm_detected) {
 				// Draw circle for SVM
-				circle(
-					mat_frame2, 
-					Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
-					5, CV_RGB(255,0,0), 3
-				);
+				if (curr_blob >= keypoints_size_orig)
+					circle(
+						mat_frame2, 
+						Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
+						5, CV_RGB(0,255,0), 3
+					);
+				else 
+					circle(
+						mat_frame2, 
+						Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
+						5, CV_RGB(255,0,0), 3
+					);
 			}
 
 			// Haar
@@ -212,51 +243,10 @@ int main(int argc, const char *argv[])
 				curr_blobs.push_back(keypoints[curr_blob]);
 		}
 
-		// Use optical flow to track blobs from previous frame
-		optflow_prev_mat.create(1,prev_blobs.size(),CV_32FC2);
-		int blob_num = 0;
-		for (list<KeyPoint>::iterator it = prev_blobs.begin();
-			 it != prev_blobs.end(); it++, blob_num++) 
-		{
-			optflow_prev_mat.at<Vec2f>(0,blob_num)[0] = it->pt.x;
-			optflow_prev_mat.at<Vec2f>(0,blob_num)[1] = it->pt.y;
-		}
-		optflow_prev.upload(optflow_prev_mat);
-		optflow.sparse(
-			frame2_gray_prev,
-			frame1_gray,
-			optflow_prev,
-			optflow_next,
-			optflow_status
-		);
-		swap(optflow_prev,optflow_next);
-		optflow.sparse(
-			frame1_gray,
-			frame2_gray,
-			optflow_prev,
-			optflow_next,
-			optflow_status
-		);
-		swap(optflow_prev,optflow_next);
-		optflow_next.download(optflow_next_mat);
-		optflow_status.download(optflow_status_mat);
-		swap(frame2_gray, frame2_gray_prev);
-
-		blob_num = 0;
-		for (list<KeyPoint>::iterator it = prev_blobs.begin();
-			 it != prev_blobs.end(); it++, blob_num++) 
-		{
-			if (!optflow_status_mat.at<uchar>(0,blob_num)) 
-				continue;
-			curr_blobs.push_back(*it);
-			int x = optflow_next_mat.at<Vec2f>(0,blob_num)[0];
-			int y = optflow_next_mat.at<Vec2f>(0,blob_num)[1];
-			circle(
-				mat_frame2, 
-				Point(x, y), 
-				5, CV_RGB(0,255,0), 3
-			);
-		}
+		//swap(frame2_gray, frame2_gray_prev);
+		swap(curr_blobs, prev_blobs);
+		mat_frame2_gray_prev = mat_frame2_gray.clone();
+		//prev_blobs = curr_blobs;
 
 		// Show images
 		imshow(W_COLOR,mat_frame2);
@@ -270,7 +260,6 @@ int main(int argc, const char *argv[])
 		case 'x': 
 			return 0;
 		}
-		timing(false);
 	}
 	return 0;
 }
