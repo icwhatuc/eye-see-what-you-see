@@ -133,11 +133,11 @@ bool predict_eye_haar(Mat &img, Mat &coloredimg, Point &offset) {
 	std::vector<Rect> eyes;
 	equalizeHist(img,img_mat);
 	cascade.detectMultiScale(img_mat, eyes, 1.2, 3, CV_HAAR_DO_CANNY_PRUNING, Size(20,20) );
-	/*
+	
 	for(int i = 0 ; i < eyes.size(); i++)
 		rectangle(coloredimg, Point(eyes[i].x + offset.x,eyes[i].y + offset.y), Point(eyes[i].x + eyes[i].width + offset.x, eyes[i].y + eyes[i].height + offset.y), 
 			CV_RGB(255,255,51),2);
-	*/
+	
 	return eyes.size() > 0;
 }
 
@@ -151,12 +151,12 @@ bool predict_eyepair(Mat &img, Mat &coloredimg, Point &offset) {
 	std::vector<Rect> eyepairs;
 	equalizeHist(img,img_mat);
 	cascade.detectMultiScale(img_mat, eyepairs, 1.2, 2, CV_HAAR_DO_CANNY_PRUNING, Size(60,20) );
-	/*
+	
 	for(int i = 0 ; i < eyepairs.size(); i++) {
 		rectangle(coloredimg, Point(eyepairs[i].x + offset.x,eyepairs[i].y + offset.y), Point(eyepairs[i].x + eyepairs[i].width + offset.x, eyepairs[i].y + eyepairs[i].height + offset.y), 
 			CV_RGB(0,0,255),2);
 		break;
-	}*/
+	}
 	return eyepairs.size() == 1;
 }
 
@@ -522,7 +522,7 @@ int main(int argc, char *argv[])
 			wait_time = 1;
 		}
 
-		int keyVal = cvWaitKey(wait_time) & 255;
+		int keyVal = cvWaitKey(1000) & 255;
 		
 		/*if(keypoints.size() > 20)
 			keyVal = 'n';*/

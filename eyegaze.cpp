@@ -18,6 +18,8 @@
 #define HIST_BINS   256
 #define HIST_THRESHOLD 0.001
 
+#define MAX_BLOBS 20
+
 // SVM and Haar
 #define SVM_IMG_SIZE 75
 #define SVM_FILE          "eye_classify_withweights.svm"
@@ -34,6 +36,9 @@ using namespace std;
 
 void timing(bool start, string what="");
 Rect haarEyeClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image);
+Rect haarEyePairClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image);
+Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2);
+gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r);
 bool svmEyeClassify(CvSVM &svm, Mat &image);
 bool pointsOverlap(Point2f &p1, Point2f &p2);
 
@@ -54,19 +59,15 @@ int main(int argc, const char *argv[])
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT);
 	
 	// Initialize matrix objects
-	gpu::GpuMat frame1, 
-				frame1_gray, 
-				frame2,
-				frame2_gray,
-				frame2_gray_prev,
-				diff_img, thresh_img,
-				hist;
-	Mat mat_frame1,
-		mat_frame1_gray,
-		mat_frame2,
-		mat_frame2_gray,
-		mat_frame2_gray_prev,
-		mat_diff, mat_thresh, mat_hist;
+	gpu::GpuMat frame1, frame1_gray, 
+	            frame2, frame2_gray,
+	            frame2_gray_prev,
+	            diff_img, thresh_img,
+	            hist;
+	Mat mat_frame1, mat_frame1_gray,
+	    mat_frame2, mat_frame2_gray,
+	    mat_frame2_gray_prev,
+	    mat_diff, mat_thresh, mat_hist;
 
 	// SVM
 	CvSVM svm;
@@ -96,7 +97,7 @@ int main(int argc, const char *argv[])
 	params.minCircularity = 0.3f;
 	params.maxCircularity = 1.0f;
 	params.thresholdStep = 1;
-	vector<KeyPoint> keypoints, prev_blobs, curr_blobs;
+	vector<KeyPoint> keypoints, prev_eyes, curr_eyes;
 
 	// Histogram-related constants
 	const int histThresholdPixels = CAM_WIDTH*CAM_HEIGHT*HIST_THRESHOLD;
@@ -154,16 +155,21 @@ int main(int argc, const char *argv[])
 		blob_detector->create("SimpleBlob");
 		diff_img.download(mat_diff); // Blob detect doesn't work on GpuMat objects
 		blob_detector->detect(mat_diff, keypoints);
-		drawKeypoints(mat_frame2,keypoints,mat_frame2,CV_RGB(0,0,255));
 
-		curr_blobs.clear();
+		// If too many blobs, skip the processing
+		if (keypoints.size() > MAX_BLOBS)
+			keypoints.clear();
+		else
+			drawKeypoints(mat_frame2,keypoints,mat_frame2,CV_RGB(0,0,255));
+
+		curr_eyes.clear();
 		optflow_curr.clear();
 		optflow_prev.clear();
 
 		// Update positions of previous blobs with optical flow
-		if (prev_blobs.size() > 0) {
+		if (prev_eyes.size() > 0) {
 			vector<KeyPoint>::iterator it;
-			for (it = prev_blobs.begin(); it != prev_blobs.end(); it++) 
+			for (it = prev_eyes.begin(); it != prev_eyes.end(); it++) 
 				optflow_prev.push_back(it->pt);
 
 			calcOpticalFlowPyrLK(
@@ -214,18 +220,13 @@ int main(int argc, const char *argv[])
 
 			if (svm_detected) {
 				// Draw circle for SVM
-				if (curr_blob >= keypoints_size_orig)
-					circle(
-						mat_frame2, 
-						Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
-						5, CV_RGB(0,255,0), 3
-					);
-				else 
-					circle(
-						mat_frame2, 
-						Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
-						5, CV_RGB(255,0,0), 3
-					);
+				circle(
+					mat_frame2, 
+					Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
+					5, 
+					(curr_blob>=keypoints_size_orig) ? CV_RGB(0,255,0) : CV_RGB(255,0,0), 
+					3
+				);
 			}
 
 			// Haar
@@ -240,13 +241,62 @@ int main(int argc, const char *argv[])
 			}
 
 			if (svm_detected || haar_detected)
-				curr_blobs.push_back(keypoints[curr_blob]);
+				curr_eyes.push_back(keypoints[curr_blob]);
 		}
 
+		// Pair eyes
+		Rect eyepair_rect_in, eyepair_rect_out;
+		for (int eye1 = 0; eye1 < curr_eyes.size(); eye1++) {
+			for (int eye2 = 0; eye2 < curr_eyes.size(); eye2++) {
+				if (eye1 == eye2)
+					continue;
+				eyepair_rect_in = getEyePairRect(curr_eyes[eye1], curr_eyes[eye2]);
+				gpu::GpuMat eyepair = getEyePairImage(mat_frame2_gray,eyepair_rect_in);
+				/*
+				int x = eyepair_rect_in.x;
+				int y = eyepair_rect_in.y;
+				eyepair_rect_out = haarEyePairClassify(eyepair_cascade, eyepair);
+				if (eyepair_rect_out.area() > 1) {
+					rectangle(
+						mat_frame2,
+						Point(x+eyepair_rect_out.x, y+eyepair_rect_out.y),
+						Point(x+eyepair_rect_out.width+eyepair_rect_out.x, y+eyepair_rect_out.height+eyepair_rect_out.y),
+						CV_RGB(0,0,255), 2
+					);
+				}
+				*/
+				int x1 = eyepair_rect_in.x+SVM_IMG_SIZE/2;
+				int y1 = eyepair_rect_in.y;
+				int x2 = x1 + eyepair_rect_in.width - SVM_IMG_SIZE;
+				int y2 = y1 + eyepair_rect_in.height;
+				int dx = (x2-x1)/4;
+				eyepair_rect_out = haarEyePairClassify(eyepair_cascade, eyepair);
+				/*
+				if (eyepair_rect_out.area() > 1) {
+					rectangle(
+						mat_frame2,
+						Point(eyepair_rect_in.x, eyepair_rect_in.y),
+						Point(eyepair_rect_in.width+eyepair_rect_in.x, eyepair_rect_in.height+eyepair_rect_in.y),
+						CV_RGB(0,0,255), 2
+					);
+				}
+				*/
+				if (eyepair_rect_out.area() > 1) {
+					rectangle(
+						mat_frame2,
+						Point(x1-dx, y1),
+						Point(x2+dx, y2),
+						CV_RGB(0,0,255), 2
+					);
+				}
+			}
+		}
+
+
 		//swap(frame2_gray, frame2_gray_prev);
-		swap(curr_blobs, prev_blobs);
+		swap(curr_eyes, prev_eyes);
 		mat_frame2_gray_prev = mat_frame2_gray.clone();
-		//prev_blobs = curr_blobs;
+		//prev_eyes = curr_eyes;
 
 		// Show images
 		imshow(W_COLOR,mat_frame2);
@@ -272,7 +322,6 @@ bool pointsOverlap(Point2f &p1, Point2f &p2) {
 }
 
 void timing(bool start, string what) {
-	return; //DEBUG
 	static struct timeval starttime, endtime;
 	static long mtime, seconds, useconds;
 	if (start) {
@@ -308,6 +357,46 @@ Rect haarEyeClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image) {
 	eyes.colRange(0, numDetected).download(tmpMat);
 	Rect *eyeRect = tmpMat.ptr<Rect>();
 	return eyeRect[0];
+}
+
+Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2) {
+	Rect r(kp1.pt, kp2.pt);
+	r.x -= SVM_IMG_SIZE/2;
+	r.y -= SVM_IMG_SIZE/2;
+	r.height += SVM_IMG_SIZE;
+	r.width += SVM_IMG_SIZE;
+	return r;
+}
+
+gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r) {
+	Mat eye_pair = mat_image(r);
+	Mat resized_pair(SVM_IMG_SIZE, SVM_IMG_SIZE*2, CV_8UC1);
+	resize(eye_pair, resized_pair, resized_pair.size(), 1, 1);
+
+	//DEBUG
+	cvNamedWindow("test", CV_WINDOW_NORMAL);
+	imshow("test",resized_pair);
+	return gpu::GpuMat(resized_pair);
+}
+
+Rect haarEyePairClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image) {
+	gpu::GpuMat eyePairs, eqImage;
+	const float scaleFactor = 1.2;
+	const int minNeighbors = 3;
+	const Size minSize = Size(60,20);
+
+	gpu::equalizeHist(image, eqImage);
+	eqImage.convertTo(eqImage,CV_8U);
+	int numDetected = cascade.detectMultiScale(eqImage, eyePairs, scaleFactor, minNeighbors, minSize);
+
+	// If no eyepairs detected, return rectangle with area 1
+	if (numDetected == 0)
+		return Rect(0,0,1,1);
+	
+	Mat tmpMat;
+	eyePairs.colRange(0, numDetected).download(tmpMat);
+	Rect *eyePairRect = tmpMat.ptr<Rect>();
+	return eyePairRect[0];
 }
 
 bool svmEyeClassify(CvSVM &svm, Mat &image) {
