@@ -252,7 +252,6 @@ int main(int argc, const char *argv[])
 					continue;
 				eyepair_rect_in = getEyePairRect(curr_eyes[eye1], curr_eyes[eye2]);
 				gpu::GpuMat eyepair = getEyePairImage(mat_frame2_gray,eyepair_rect_in);
-				/*
 				int x = eyepair_rect_in.x;
 				int y = eyepair_rect_in.y;
 				eyepair_rect_out = haarEyePairClassify(eyepair_cascade, eyepair);
@@ -264,39 +263,12 @@ int main(int argc, const char *argv[])
 						CV_RGB(0,0,255), 2
 					);
 				}
-				*/
-				int x1 = eyepair_rect_in.x+SVM_IMG_SIZE/2;
-				int y1 = eyepair_rect_in.y;
-				int x2 = x1 + eyepair_rect_in.width - SVM_IMG_SIZE;
-				int y2 = y1 + eyepair_rect_in.height;
-				int dx = (x2-x1)/4;
-				eyepair_rect_out = haarEyePairClassify(eyepair_cascade, eyepair);
-				/*
-				if (eyepair_rect_out.area() > 1) {
-					rectangle(
-						mat_frame2,
-						Point(eyepair_rect_in.x, eyepair_rect_in.y),
-						Point(eyepair_rect_in.width+eyepair_rect_in.x, eyepair_rect_in.height+eyepair_rect_in.y),
-						CV_RGB(0,0,255), 2
-					);
-				}
-				*/
-				if (eyepair_rect_out.area() > 1) {
-					rectangle(
-						mat_frame2,
-						Point(x1-dx, y1),
-						Point(x2+dx, y2),
-						CV_RGB(0,0,255), 2
-					);
-				}
 			}
 		}
 
-
-		//swap(frame2_gray, frame2_gray_prev);
+		swap(mat_frame2_gray, mat_frame2_gray_prev);
 		swap(curr_eyes, prev_eyes);
-		mat_frame2_gray_prev = mat_frame2_gray.clone();
-		//prev_eyes = curr_eyes;
+		//mat_frame2_gray_prev = mat_frame2_gray.clone();
 
 		// Show images
 		imshow(W_COLOR,mat_frame2);
@@ -372,10 +344,6 @@ gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r) {
 	Mat eye_pair = mat_image(r);
 	Mat resized_pair(SVM_IMG_SIZE, SVM_IMG_SIZE*2, CV_8UC1);
 	resize(eye_pair, resized_pair, resized_pair.size(), 1, 1);
-
-	//DEBUG
-	cvNamedWindow("test", CV_WINDOW_NORMAL);
-	imshow("test",resized_pair);
 	return gpu::GpuMat(resized_pair);
 }
 
@@ -415,4 +383,5 @@ bool svmEyeClassify(CvSVM &svm, Mat &image) {
 	float retval = svm.predict(imageMat1D); // Non-eye: -1, Eye: +1
 	return retval>0;
 }
+
 
