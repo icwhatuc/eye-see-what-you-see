@@ -62,8 +62,8 @@ int main(int argc, const char *argv[])
 	gpu::GpuMat frame1, frame1_gray, 
 	            frame2, frame2_gray,
 	            frame2_gray_prev,
-	            diff_img, thresh_img,
-	            hist;
+	            diff_img, diff_img_blurred, 
+				thresh_img, hist;
 	Mat mat_frame1, mat_frame1_gray,
 	    mat_frame2, mat_frame2_gray,
 	    mat_frame2_gray_prev,
@@ -112,9 +112,9 @@ int main(int argc, const char *argv[])
 	std::vector<float> optflow_err;
 
 	// Display windows
-	cvNamedWindow(W_COLOR, CV_WINDOW_NORMAL);
-	cvNamedWindow(W_DIFF, CV_WINDOW_NORMAL);
-	cvNamedWindow(W_THRESH, CV_WINDOW_NORMAL);
+	namedWindow(W_COLOR, CV_WINDOW_NORMAL);
+	namedWindow(W_DIFF, CV_WINDOW_NORMAL);
+	namedWindow(W_THRESH, CV_WINDOW_NORMAL);
 
 	capture >> mat_frame2;
 	frame2.upload(mat_frame2);
@@ -132,10 +132,8 @@ int main(int argc, const char *argv[])
 
 		// Obtain difference image and blur
 		gpu::absdiff(frame2_gray, frame1_gray, diff_img);
-		diff_img.download(mat_diff);
-		blur(mat_diff, mat_diff, Size(3, 3), Point(-1,-1));
-		diff_img.upload(mat_diff);
-		//gpu::blur(diff_img, diff_img, Size(3, 3), Point(-1,-1));
+		gpu::blur(diff_img, diff_img_blurred, Size(3, 3), Point(-1,-1));
+		swap(diff_img, diff_img_blurred);
 
 		// Find threshold based on histogram
 		gpu::calcHist(diff_img,hist);
@@ -383,5 +381,4 @@ bool svmEyeClassify(CvSVM &svm, Mat &image) {
 	float retval = svm.predict(imageMat1D); // Non-eye: -1, Eye: +1
 	return retval>0;
 }
-
 
