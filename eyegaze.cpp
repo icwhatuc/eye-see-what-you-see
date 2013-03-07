@@ -41,6 +41,7 @@ Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2);
 gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r);
 bool svmEyeClassify(CvSVM &svm, Mat &image);
 bool pointsOverlap(Point2f &p1, Point2f &p2);
+float getDistFromCamera(KeyPoint &kp1, KeyPoint &kp2);
 
 int main(int argc, const char *argv[])
 {
@@ -112,18 +113,20 @@ int main(int argc, const char *argv[])
 	std::vector<float> optflow_err;
 
 	// Display windows
-	namedWindow(W_COLOR, CV_WINDOW_NORMAL);
 	namedWindow(W_DIFF, CV_WINDOW_NORMAL);
 	namedWindow(W_THRESH, CV_WINDOW_NORMAL);
+	namedWindow(W_COLOR, CV_WINDOW_NORMAL);
 
 	capture >> mat_frame2;
 	frame2.upload(mat_frame2);
 	gpu::cvtColor(frame2, frame2_gray_prev, CV_BGR2GRAY);
+	
 	for(;;) {
 		// Grab two consecutive frames, convert to grayscale
 		capture >> mat_frame1;
 		frame1.upload(mat_frame1);
 		gpu::cvtColor(frame1, frame1_gray, CV_BGR2GRAY);
+		frame1_gray.download(mat_frame1_gray);
 		
 		capture >> mat_frame2;
 		frame2.upload(mat_frame2);
@@ -144,6 +147,8 @@ int main(int argc, const char *argv[])
 			if (hist_count > histThresholdPixels)
 				break;
 		}
+
+		// DEBUG: For display purposes only
 		gpu::threshold(diff_img,thresh_img,thresh_bin,255,CV_THRESH_BINARY);
 
 		// Set blob thresholds, then detect blobs
@@ -260,6 +265,16 @@ int main(int argc, const char *argv[])
 						Point(x+eyepair_rect_out.width+eyepair_rect_out.x, y+eyepair_rect_out.height+eyepair_rect_out.y),
 						CV_RGB(0,0,255), 2
 					);
+
+					//DEBUG
+					char dist_str[256];
+					sprintf(
+						dist_str, 
+						"%.1fft away",
+						getDistFromCamera(curr_eyes[eye1],curr_eyes[eye2])
+					);
+					putText(mat_frame2, dist_str, Point(x,y), FONT_HERSHEY_COMPLEX_SMALL,
+						1, CV_RGB(255,0,0), 1, CV_AA);
 				}
 			}
 		}
@@ -273,7 +288,7 @@ int main(int argc, const char *argv[])
 		imshow(W_DIFF,mat_diff);
 		thresh_img.download(mat_thresh);
 		imshow(W_THRESH,mat_thresh);
-
+		
 		// End of loop -- check for inputs
 		switch(waitKey(1)) {
 		case 27: // ESC
@@ -336,6 +351,13 @@ Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2) {
 	r.height += SVM_IMG_SIZE;
 	r.width += SVM_IMG_SIZE;
 	return r;
+}
+
+float getDistFromCamera(KeyPoint &kp1, KeyPoint &kp2) {
+	float dx = kp2.pt.x - kp1.pt.x;
+	float dy = kp2.pt.y - kp1.pt.y;
+	float distBetweenEyes = sqrt(dx*dx + dy*dy); // Dist in pixels
+	return 295/distBetweenEyes; // 295: constant determined experimentally
 }
 
 gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r) {
