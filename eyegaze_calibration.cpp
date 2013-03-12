@@ -16,10 +16,10 @@
 #define CAM_WIDTH   1920
 #define CAM_HEIGHT  1080
 #define HIST_BINS   256
-#define HIST_THRESHOLD 0.0005
+#define HIST_THRESHOLD 0.0002
 
 #define MAX_BLOBS 20
-#define REYE 0.5 // inches
+#define REYE      0.0416667 // feet
 
 // SVM and Haar
 #define SVM_IMG_SIZE 75
@@ -90,7 +90,7 @@ int main(int argc, const char *argv[])
 
 	// Blob detection parameters
 	SimpleBlobDetector::Params params;
-	params.minDistBetweenBlobs = 50.0f;
+	params.minDistBetweenBlobs = 30.0f;
 	params.filterByInertia = false;
 	params.filterByConvexity = false;
 	params.filterByColor = false;
@@ -486,10 +486,10 @@ Point2f gazePoints(float d,
 	cout << "eyeLocRight = (" << eyeLocRight.pt.x << "," << eyeLocRight.pt.y << ")" << endl;
 	cout << "---------" << endl;
 
-	float pxtoft; // pixel to feet - computed from distance from camera
+	float ftPerPx; // pixel to feet - computed from distance from camera
 
 	// ratio is based on d
-	pxtoft = d*d/1500;		// units ft/px
+	ftPerPx = d/1500;		// units ft/px
 
 	// assume initial points corresponding to center of screen (x,y)
 	// this is centerLoc
@@ -499,11 +499,11 @@ Point2f gazePoints(float d,
 	// *** THIS IS HARDER... - we might need to look at ratios
 
 	// obtain the delta x and delta y - in feet
-	delxLeft = (eyeLocLeft.pt.x - centerLocLeft.pt.x)*pxtoft;
-	delyLeft = (eyeLocLeft.pt.y - centerLocLeft.pt.y)*pxtoft;
+	delxLeft = (eyeLocLeft.pt.x - centerLocLeft.pt.x)*ftPerPx;
+	delyLeft = (eyeLocLeft.pt.y - centerLocLeft.pt.y)*ftPerPx;
 
-	delxRight = (eyeLocRight.pt.x - centerLocRight.pt.x)*pxtoft;
-	delyRight = (eyeLocRight.pt.y - centerLocRight.pt.y)*pxtoft;
+	delxRight = (eyeLocRight.pt.x - centerLocRight.pt.x)*ftPerPx;
+	delyRight = (eyeLocRight.pt.y - centerLocRight.pt.y)*ftPerPx;
 
 	// compute the approximate location on screen
 	KeyPoint gazeShiftL, gazeShiftR; 
@@ -519,10 +519,10 @@ Point2f gazePoints(float d,
 
 	// take average of both eyes
 	//DEBUG: constant scaling factor
-	int scalingfactor = 3;
+	int scalingfactor = 1;
 	
-	gazeLoc.x = -scalingfactor*(gazeShiftL.pt.x+gazeShiftR.pt.x)/2/pxtoft + CAM_WIDTH/2;
-	gazeLoc.y = scalingfactor*(gazeShiftL.pt.y+gazeShiftR.pt.y)/2/pxtoft + CAM_HEIGHT/2;
+	gazeLoc.x = -scalingfactor*(gazeShiftL.pt.x+gazeShiftR.pt.x)/2/ftPerPx + CAM_WIDTH/2;
+	gazeLoc.y = scalingfactor*(gazeShiftL.pt.y+gazeShiftR.pt.y)/2/ftPerPx + CAM_HEIGHT/2;
 
 	cout << "gazeLoc = (" << gazeLoc.x << "," << gazeLoc.y << ")" << endl;
 
