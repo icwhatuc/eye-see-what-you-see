@@ -120,6 +120,10 @@ int main(int argc, const char *argv[])
 	namedWindow(W_THRESH, CV_WINDOW_NORMAL);
 	namedWindow(W_COLOR, CV_WINDOW_NORMAL);
 
+	// Move color image window to (0,0) and make fullscreen
+	moveWindow(W_COLOR,0,0);
+	setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
+
 	capture >> mat_frame2;
 	frame2.upload(mat_frame2);
 	gpu::cvtColor(frame2, frame2_gray_prev, CV_BGR2GRAY);
@@ -259,11 +263,16 @@ int main(int argc, const char *argv[])
 		Rect eyepair_rect_in, eyepair_rect_out;
 		for (int eye1 = 0; eye1 < curr_eyes.size(); eye1++) {
 			for (int eye2 = eye1+1; eye2 < curr_eyes.size(); eye2++) {
-				eyepair_rect_in = getEyePairRect(curr_eyes[eye1], curr_eyes[eye2]);
+				KeyPoint &leftEye = curr_eyes[eye1], &rightEye = curr_eyes[eye2];
+				if (curr_eyes[eye1].pt.x > curr_eyes[eye2].pt.x)
+					swap(leftEye,rightEye);
+
+				eyepair_rect_in = getEyePairRect(leftEye, rightEye);
 				gpu::GpuMat eyepair = getEyePairImage(mat_frame2_gray,eyepair_rect_in);
 				int x = eyepair_rect_in.x;
 				int y = eyepair_rect_in.y;
 				eyepair_rect_out = haarEyePairClassify(eyepair_cascade, eyepair);
+				// DEBUG: temporary thing to do gaze detection without needing to pair eyes
 				if(curr_eyes.size() == 2)
 				{
 					// Calibration
@@ -279,9 +288,6 @@ int main(int argc, const char *argv[])
 							curr_eyes[eye2]
 						);
 
-						cout << "gaze_loc[0]: (" << gaze_loc[0].x << "," << gaze_loc[0].y << ")" << endl;
-						cout << "gaze_loc[1]: (" << gaze_loc[1].x << "," << gaze_loc[1].y << ")" << endl;
-
 						circle(
 							mat_frame2, 
 							gaze_loc[0], 
@@ -295,20 +301,16 @@ int main(int argc, const char *argv[])
 					}
 				}
 				if (eyepair_rect_out.area() > 1) {
-					// eye1 should be on the left
-					if (curr_eyes[eye1].pt.x > curr_eyes[eye2].pt.x)
-						swap(curr_eyes[eye1],curr_eyes[eye2]);
-
 					rectangle(
 						mat_frame2,
-						Point(x+eyepair_rect_out.x, y+eyepair_rect_out.y),
-						Point(x+eyepair_rect_out.width+eyepair_rect_out.x, y+eyepair_rect_out.height+eyepair_rect_out.y),
+						Point(eyepair_rect_in.x, eyepair_rect_in.y),
+						Point(eyepair_rect_in.width+eyepair_rect_in.x, eyepair_rect_in.height+eyepair_rect_in.y),
 						CV_RGB(0,0,255), 2
 					);
 
 					//DEBUG
 					char dist_str[256];
-					float dist_from_cam = getDistFromCamera(curr_eyes[eye1],curr_eyes[eye2]);
+					float dist_from_cam = getDistFromCamera(leftEye,rightEye);
 					sprintf(
 						dist_str, 
 						"%.1fft away",
@@ -432,7 +434,7 @@ float getDistFromCamera(KeyPoint &kp1, KeyPoint &kp2) {
 
 gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r) {
 	Mat eye_pair = mat_image(r);
-	Mat resized_pair(SVM_IMG_SIZE, SVM_IMG_SIZE*2, CV_8UC1);
+	Mat resized_pair(SVM_IMG_SIZE, SVM_IMG_SIZE*3, CV_8UC1);
 	resize(eye_pair, resized_pair, resized_pair.size(), 1, 1);
 	return gpu::GpuMat(resized_pair);
 }
@@ -483,26 +485,8 @@ vector<Point2f> gazePoints(float d,
 	float delxLeft, delyLeft, delxRight, delyRight;
 	vector<Point2f> gazeLoc;
 
-	// DEBUG
-	/*
-	cout << "in function gazePoints" << endl;
-	cout << "d = " << d << endl;
-	cout << "centerLocLeft = (" << centerLocLeft.pt.x << "," << centerLocLeft.pt.y << ")" << endl;
-	cout << "centerLocRight = (" << centerLocRight.pt.x << "," << centerLocRight.pt.y << ")" << endl;
-	cout << "eyeLocLeft = (" << eyeLocLeft.pt.x << "," << eyeLocLeft.pt.y << ")" << endl;
-	cout << "eyeLocRight = (" << eyeLocRight.pt.x << "," << eyeLocRight.pt.y << ")" << endl;
-	cout << "---------" << endl;
-	*/
-
 	// pixel to feet - computed from distance from camera
 	float ftPerPx = d/1500;		// units ft/px
-
-	// assume initial points corresponding to center of screen (x,y)
-	// this is centerLoc
-
-	// if eyes move, adjust the initial points (the loc corres to center of
-	// screen is now shifted
-	// *** THIS IS HARDER... - we might need to look at ratios
 
 	// obtain the delta x and delta y - in feet
 	delxLeft = (eyeLocLeft.pt.x - centerLocLeft.pt.x)*ftPerPx;
@@ -520,27 +504,20 @@ vector<Point2f> gazePoints(float d,
 	gazeShiftR.pt.x = delxRight/REYE*(REYE+d);
 	gazeShiftR.pt.y = delyRight/REYE*(REYE+d);
 
-	/*
-	cout << "gazeShiftL = (" << gazeShiftL.pt.x << "," << gazeShiftL.pt.y << ")" << endl;
-	cout << "gazeShiftR = (" << gazeShiftR.pt.x << "," << gazeShiftR.pt.y << ")" << endl;
-	*/
-
 	// take average of both eyes
-	int scalingfactor = 1; //DEBUG: constant scaling factor
+	int scalingFactor = 1; //DEBUG: constant scaling factor
 	
-	Point2f gazeLoctemp;
+	Point2f gazeLocTemp;
 
-	gazeLoctemp.x = -scalingfactor*(gazeShiftL.pt.x)/ftPerPx + CAM_WIDTH/2;
-	gazeLoctemp.y = scalingfactor*(gazeShiftL.pt.y)/ftPerPx + CAM_HEIGHT/2;
+	gazeLocTemp.x = -scalingFactor*(gazeShiftL.pt.x)/ftPerPx + CAM_WIDTH/2;
+	gazeLocTemp.y = scalingFactor*(gazeShiftL.pt.y)/ftPerPx + CAM_HEIGHT/2;
 
-	gazeLoc.push_back(gazeLoctemp);
+	gazeLoc.push_back(gazeLocTemp);
 
-	gazeLoctemp.x = -scalingfactor*(gazeShiftR.pt.x)/ftPerPx + CAM_WIDTH/2;
-	gazeLoctemp.y = scalingfactor*(gazeShiftR.pt.y)/ftPerPx + CAM_HEIGHT/2;
+	gazeLocTemp.x = -scalingFactor*(gazeShiftR.pt.x)/ftPerPx + CAM_WIDTH/2;
+	gazeLocTemp.y = scalingFactor*(gazeShiftR.pt.y)/ftPerPx + CAM_HEIGHT/2;
 
-	gazeLoc.push_back(gazeLoctemp);
-
-	//cout << "gazeLoc = (" << gazeLoctemp.x << "," << gazeLoctemp.y << ")" << endl;
+	gazeLoc.push_back(gazeLocTemp);
 
 	return gazeLoc;
 }
