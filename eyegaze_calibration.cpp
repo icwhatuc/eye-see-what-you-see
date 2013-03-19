@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <cmath>
 #include "opencv2/gpu/gpu.hpp"
-#include "eyepair.h"
 
 #define CAM_WIDTH   1920
 #define CAM_HEIGHT  1080
@@ -30,6 +29,7 @@
 #define SVM_FILE          "eye_classify_withweights.svm"
 #define HAAR_EYE_FILE     "cascades/haarcascade_eye.xml"
 #define HAAR_EYEPAIR_FILE "cascades/haarcascade_eyepair.xml"
+#define HAAR_NOSE_FILE    "cascades/haarcascade_nose.xml"
 
 // Window names
 #define W_COLOR  "color"
@@ -40,8 +40,10 @@ using namespace cv;
 using namespace std;
 
 void timing(bool start, string what="");
-Rect haarEyeClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image);
-Rect haarEyePairClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image);
+Rect haarClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image, int w, int h);
+#define haarEyeClassify(cascade,image) haarClassify(cascade,image,20,20)
+#define haarEyePairClassify(cascade,image) haarClassify(cascade,image,60,20)
+#define haarNoseClassify(cascade,image) haarClassify(cascade,image,25,15)
 Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2);
 gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r);
 bool svmEyeClassify(CvSVM &svm, Mat &image);
@@ -82,13 +84,17 @@ int main(int argc, const char *argv[])
 	svm.load(SVM_FILE);
 
 	// Haar
-	gpu::CascadeClassifier_GPU eye_cascade, eyepair_cascade;
+	gpu::CascadeClassifier_GPU eye_cascade, eyepair_cascade, nose_cascade;
 	if (!eye_cascade.load(HAAR_EYE_FILE)) {
-		fprintf(stderr, "ERROR: could not load haar cascade xml for eyes\n");
+		fprintf(stderr, "ERROR: could not load Haar cascade xml for eyes\n");
 		return -1;
 	}
 	if (!eyepair_cascade.load(HAAR_EYEPAIR_FILE)) {
-		fprintf(stderr, "ERROR: could not load haar cascade xml for eye pairs\n");
+		fprintf(stderr, "ERROR: could not load Haar cascade xml for eye pairs\n");
+		return -1;
+	}
+	if (!nose_cascade.load(HAAR_NOSE_FILE)) {
+		fprintf(stderr, "ERROR: could not load Haar cascade xml for eye nose\n");
 		return -1;
 	}
 
@@ -232,8 +238,9 @@ int main(int argc, const char *argv[])
 			gpu::GpuMat candidate_img(mat_candidate_img);
 
 			// SVM
-			Rect eye_rect = haarEyeClassify(eye_cascade,candidate_img);
-			bool haar_detected = eye_rect.area() > 1;
+			//Rect eye_rect = haarEyeClassify(eye_cascade,candidate_img);
+			//bool haar_detected = eye_rect.area() > 1;
+			bool haar_detected = false; // DEBUG: don't use haar for eyes
 			bool svm_detected = svmEyeClassify(svm,mat_candidate_img);
 
 			if (svm_detected) {
@@ -248,8 +255,8 @@ int main(int argc, const char *argv[])
 			}
 
 			// Haar
+			/*
 			if (haar_detected) {
-				/*
 				// Draw rectangle for Haar
 				rectangle(
 					mat_frame2,
@@ -257,8 +264,8 @@ int main(int argc, const char *argv[])
 					Point(x+eye_rect.width+eye_rect.x, y+eye_rect.height+eye_rect.y),
 					CV_RGB(255,255,51), 2
 				);
-				*/
 			}
+			*/
 
 			if (svm_detected || haar_detected)
 				curr_eyes.push_back(keypoints[curr_blob]);
@@ -400,24 +407,26 @@ void timing(bool start, string what) {
 	}
 }
 
-Rect haarEyeClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image) {
-	gpu::GpuMat eyes, eqImage;
+Rect haarClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image,
+	int w, int h) 
+{
+	gpu::GpuMat features, eqImage;
 	const float scaleFactor = 1.2;
 	const int minNeighbors = 3;
-	const Size minSize = Size(20,20);
+	Size minSize = Size(w,h);
 
 	gpu::equalizeHist(image, eqImage);
 	eqImage.convertTo(eqImage,CV_8U);
-	int numDetected = cascade.detectMultiScale(eqImage, eyes, scaleFactor, minNeighbors, minSize);
+	int numDetected = cascade.detectMultiScale(eqImage, features, scaleFactor, minNeighbors, minSize);
 
-	// If no eyes detected, return rectangle with area 1
+	// If no features detected, return rectangle with area 1
 	if (numDetected == 0)
 		return Rect(0,0,1,1);
 	
 	Mat tmpMat;
-	eyes.colRange(0, numDetected).download(tmpMat);
-	Rect *eyeRect = tmpMat.ptr<Rect>();
-	return eyeRect[0];
+	features.colRange(0, numDetected).download(tmpMat);
+	Rect *featureRect = tmpMat.ptr<Rect>();
+	return featureRect[0];
 }
 
 Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2) {
@@ -428,7 +437,6 @@ Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2) {
 	r.width += SVM_IMG_SIZE;
 	return r;
 }
-
 
 float getDistFromCamera(KeyPoint &kp1, KeyPoint &kp2) {
 	float dx = kp2.pt.x - kp1.pt.x;
@@ -442,26 +450,6 @@ gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r) {
 	Mat resized_pair(SVM_IMG_SIZE, SVM_IMG_SIZE*3, CV_8UC1);
 	resize(eye_pair, resized_pair, resized_pair.size(), 1, 1);
 	return gpu::GpuMat(resized_pair);
-}
-
-Rect haarEyePairClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image) {
-	gpu::GpuMat eyePairs, eqImage;
-	const float scaleFactor = 1.2;
-	const int minNeighbors = 3;
-	const Size minSize = Size(60,20);
-
-	gpu::equalizeHist(image, eqImage);
-	eqImage.convertTo(eqImage,CV_8U);
-	int numDetected = cascade.detectMultiScale(eqImage, eyePairs, scaleFactor, minNeighbors, minSize);
-
-	// If no eyepairs detected, return rectangle with area 1
-	if (numDetected == 0)
-		return Rect(0,0,1,1);
-	
-	Mat tmpMat;
-	eyePairs.colRange(0, numDetected).download(tmpMat);
-	Rect *eyePairRect = tmpMat.ptr<Rect>();
-	return eyePairRect[0];
 }
 
 bool svmEyeClassify(CvSVM &svm, Mat &image) {
@@ -482,10 +470,8 @@ bool svmEyeClassify(CvSVM &svm, Mat &image) {
 }
 
 vector<Point2f> gazePoints(float d,
-			   KeyPoint &centerLocLeft,
-			   KeyPoint &centerLocRight,
-			   KeyPoint &eyeLocLeft,
-			   KeyPoint &eyeLocRight)
+			   KeyPoint &centerLocLeft, KeyPoint &centerLocRight,
+			   KeyPoint &eyeLocLeft, KeyPoint &eyeLocRight)
 {
 	float delxLeft, delyLeft, delxRight, delyRight;
 	vector<Point2f> gazeLoc;
@@ -526,3 +512,4 @@ vector<Point2f> gazePoints(float d,
 
 	return gazeLoc;
 }
+
