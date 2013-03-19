@@ -16,10 +16,14 @@
 #define CAM_WIDTH   1920
 #define CAM_HEIGHT  1080
 #define HIST_BINS   256
-#define HIST_THRESHOLD 0.0002
+#define HIST_THRESHOLD 0.001
 
 #define MAX_BLOBS 20
 #define REYE      0.0416667 // feet
+
+#define TV_WIDTH   (40/12) // ft
+#define TV_HEIGHT  (23.5/12) // ft
+#define TV_PX_PER_FT (CAM_WIDTH/TV_WIDTH)
 
 // SVM and Haar
 #define SVM_IMG_SIZE 75
@@ -145,7 +149,8 @@ int main(int argc, const char *argv[])
 
 		// Obtain difference image and blur
 		gpu::absdiff(frame2_gray, frame1_gray, diff_img);
-		gpu::blur(diff_img, diff_img_blurred, Size(3, 3), Point(-1,-1));
+		gpu::blur(diff_img, diff_img_blurred, Size(1, 1), Point(-1,-1));
+		//gpu::blur(diff_img, diff_img_blurred, Size(3, 3), Point(-1,-1));
 		swap(diff_img, diff_img_blurred);
 
 		// Find threshold based on histogram
@@ -514,8 +519,8 @@ vector<Point2f> gazePoints(float d,
 
 	gazeLoc.push_back(gazeLocTemp);
 
-	gazeLocTemp.x = -scalingFactor*(gazeShiftR.pt.x)/ftPerPx + CAM_WIDTH/2;
-	gazeLocTemp.y = scalingFactor*(gazeShiftR.pt.y)/ftPerPx + CAM_HEIGHT/2;
+	gazeLocTemp.x = -scalingFactor*(gazeShiftR.pt.x)*TV_PX_PER_FT + CAM_WIDTH/2;
+	gazeLocTemp.y = scalingFactor*(gazeShiftR.pt.y)*TV_PX_PER_FT + CAM_HEIGHT/2;
 
 	gazeLoc.push_back(gazeLocTemp);
 
