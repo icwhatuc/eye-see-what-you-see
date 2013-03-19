@@ -17,7 +17,7 @@
 #define HIST_BINS   256
 #define HIST_THRESHOLD 0.001
 
-#define MAX_BLOBS 20
+#define MAX_BLOBS 40
 #define REYE      0.0416667 // feet
 
 #define TV_WIDTH   (40/12) // ft
@@ -25,11 +25,10 @@
 #define TV_PX_PER_FT (CAM_WIDTH/TV_WIDTH)
 
 // SVM and Haar
-#define SVM_IMG_SIZE 75
+#define SVM_IMG_SIZE      75
 #define SVM_FILE          "eye_classify_withweights.svm"
 #define HAAR_EYE_FILE     "cascades/haarcascade_eye.xml"
 #define HAAR_EYEPAIR_FILE "cascades/haarcascade_eyepair.xml"
-#define HAAR_NOSE_FILE    "cascades/haarcascade_nose.xml"
 
 // Window names
 #define W_COLOR  "color"
@@ -43,7 +42,6 @@ void timing(bool start, string what="");
 Rect haarClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image, int w, int h);
 #define haarEyeClassify(cascade,image) haarClassify(cascade,image,20,20)
 #define haarEyePairClassify(cascade,image) haarClassify(cascade,image,60,20)
-#define haarNoseClassify(cascade,image) haarClassify(cascade,image,18,15)
 Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2);
 gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r);
 bool svmEyeClassify(CvSVM &svm, Mat &image);
@@ -93,10 +91,6 @@ int main(int argc, const char *argv[])
 		fprintf(stderr, "ERROR: could not load Haar cascade xml for eye pairs\n");
 		return -1;
 	}
-	if (!nose_cascade.load(HAAR_NOSE_FILE)) {
-		fprintf(stderr, "ERROR: could not load Haar cascade xml for eye nose\n");
-		return -1;
-	}
 
 	// Blob detection parameters
 	SimpleBlobDetector::Params params;
@@ -112,6 +106,7 @@ int main(int argc, const char *argv[])
 	params.maxCircularity = 1.0f;
 	params.thresholdStep = 1;
 	vector<KeyPoint> keypoints, prev_eyes, curr_eyes;
+	vector<Point2f> prev_noses, curr_noses;
 
 	// Histogram-related constants
 	const int histThresholdPixels = CAM_WIDTH*CAM_HEIGHT*HIST_THRESHOLD;
@@ -155,7 +150,7 @@ int main(int argc, const char *argv[])
 
 		// Obtain difference image and blur
 		gpu::absdiff(frame2_gray, frame1_gray, diff_img);
-		gpu::blur(diff_img, diff_img_blurred, Size(1, 1), Point(-1,-1));
+		gpu::blur(diff_img, diff_img_blurred, Size(2, 2), Point(-1,-1));
 		//gpu::blur(diff_img, diff_img_blurred, Size(3, 3), Point(-1,-1));
 		swap(diff_img, diff_img_blurred);
 
@@ -186,11 +181,10 @@ int main(int argc, const char *argv[])
 		else
 			drawKeypoints(mat_frame2,keypoints,mat_frame2,CV_RGB(0,0,255));
 
+		// Update positions of previous blobs with optical flow
 		curr_eyes.clear();
 		optflow_curr.clear();
 		optflow_prev.clear();
-
-		// Update positions of previous blobs with optical flow
 		if (prev_eyes.size() > 0) {
 			vector<KeyPoint>::iterator it;
 			for (it = prev_eyes.begin(); it != prev_eyes.end(); it++) 
@@ -240,11 +234,8 @@ int main(int argc, const char *argv[])
 			// SVM
 			//Rect eye_rect = haarEyeClassify(eye_cascade,candidate_img);
 			//bool haar_detected = eye_rect.area() > 1;
-			//bool haar_detected = false; // DEBUG: don't use haar for eyes
+			bool haar_detected = false; // DEBUG: don't use haar for eyes
 			bool svm_detected = svmEyeClassify(svm,mat_candidate_img);
-
-			Rect nose_rect = haarNoseClassify(nose_cascade,candidate_img);
-			bool haar_detected = nose_rect.area() > 1;
 
 			if (svm_detected) {
 				// Draw circle for SVM
@@ -269,20 +260,22 @@ int main(int argc, const char *argv[])
 				);
 			}
 			*/
-			if (haar_detected) { //DEBUG: nose
-				circle(
-					mat_frame2, 
-					Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
-					5, 
-					(curr_blob>=keypoints_size_orig) ? CV_RGB(0,0,0) : CV_RGB(50,50,50), 
-					3
-				);
-			}
 
 			if (svm_detected || haar_detected)
 				curr_eyes.push_back(keypoints[curr_blob]);
 		}
 		
+		// Update positions of noses
+		swap(curr_noses,prev_noses);
+		curr_noses.clear();
+		if (prev_noses.size() > 0) {
+			calcOpticalFlowPyrLK(
+				mat_frame2_gray_prev, mat_frame2_gray, 
+				prev_noses, curr_noses,
+				optflow_status, optflow_err
+			);
+		}
+
 		// Pair eyes
 		Rect eyepair_rect_in, eyepair_rect_out;
 		for (int eye1 = 0; eye1 < curr_eyes.size(); eye1++) {
@@ -324,7 +317,8 @@ int main(int argc, const char *argv[])
 						);
 					}
 				}
-				if (eyepair_rect_out.area() > 1) {
+				if (eyepair_rect_out.area() > 1) { // Eyepair detected
+					// Draw rectangle around eyepair
 					rectangle(
 						mat_frame2,
 						Point(eyepair_rect_in.x, eyepair_rect_in.y),
@@ -356,42 +350,34 @@ int main(int argc, const char *argv[])
 					putText(mat_frame2, eyepos_str, Point(x,y-40), FONT_HERSHEY_COMPLEX_SMALL,
 						1, CV_RGB(255,0,0), 1, CV_AA);
 
-					// Detect nose. TODO: Make this neater (put things in functions)
-					int nose_rect_size = right_eye.pt.x - left_eye.pt.x;
-					Rect candidate_region(left_eye.pt.x, left_eye.pt.y, nose_rect_size, nose_rect_size);
-					Mat mat_candidate_img = mat_frame2_gray(candidate_region);
-					gpu::GpuMat candidate_img(mat_candidate_img);
-					Rect nose_rect = haarNoseClassify(nose_cascade,candidate_img);
-					if (nose_rect.area() > 1) {
-					/*
-						rectangle(
-							mat_frame2,
-							Point(nose_rect.x+candidate_region.x, nose_rect.y+candidate_region.y),
-							Point(nose_rect.width+candidate_region.x, nose_rect.height+candidate_region.y),
-							CV_RGB(255,245,238), 2
-						);
-					*/
-						circle( // this code is a mess
-							mat_frame2, 
-							Point(nose_rect.width+candidate_region.x, nose_rect.height+candidate_region.y),
-							5, 
-							CV_RGB(0,0,0), 
-							3
-						);
+					// Place point for nose ---------------------------------------
+					Point2f nose(
+						(left_eye.pt.x + right_eye.pt.x)/2,
+						(left_eye.pt.y + right_eye.pt.y)/2 + 0.7*(right_eye.pt.x - left_eye.pt.x) // TODO: choose a better value
+					);
 
-						//temporary stuff. TODO: remove
-						KeyPoint kp;
-						kp.pt.x = nose_rect.x+nose_rect.width/2+candidate_region.x;
-						kp.pt.y = nose_rect.y+nose_rect.height/2+candidate_region.y;
-						curr_eyes.push_back(kp);
+					// First check if there is already an overlapping point.
+					// If so, remove it.
+					vector<Point2f>::iterator it;
+					for (it = curr_noses.begin(); it != curr_noses.end();) {
+						if (pointsOverlap(*it, nose))
+							it = curr_noses.erase(it);
+						else 
+							it++;
 					}
+					curr_noses.push_back(nose);
+					// ------------------------------------------------------------
 				}
 			}
 		}
 
+		// Draw nose points
+		vector<Point2f>::iterator it;
+		for (it = curr_noses.begin(); it != curr_noses.end(); it++) 
+			circle(mat_frame2, *it, 5, CV_RGB(255,0,255), 3);
+
 		swap(mat_frame2_gray, mat_frame2_gray_prev);
 		swap(curr_eyes, prev_eyes);
-		//mat_frame2_gray_prev = mat_frame2_gray.clone();
 
 		// Show images
 		// DEBUG: show center of screen
