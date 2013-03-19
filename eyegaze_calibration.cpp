@@ -43,7 +43,7 @@ void timing(bool start, string what="");
 Rect haarClassify(gpu::CascadeClassifier_GPU &cascade, gpu::GpuMat &image, int w, int h);
 #define haarEyeClassify(cascade,image) haarClassify(cascade,image,20,20)
 #define haarEyePairClassify(cascade,image) haarClassify(cascade,image,60,20)
-#define haarNoseClassify(cascade,image) haarClassify(cascade,image,25,15)
+#define haarNoseClassify(cascade,image) haarClassify(cascade,image,18,15)
 Rect getEyePairRect(KeyPoint &kp1, KeyPoint &kp2);
 gpu::GpuMat getEyePairImage(Mat &mat_image, Rect &r);
 bool svmEyeClassify(CvSVM &svm, Mat &image);
@@ -275,11 +275,11 @@ int main(int argc, const char *argv[])
 		Rect eyepair_rect_in, eyepair_rect_out;
 		for (int eye1 = 0; eye1 < curr_eyes.size(); eye1++) {
 			for (int eye2 = eye1+1; eye2 < curr_eyes.size(); eye2++) {
-				KeyPoint &leftEye = curr_eyes[eye1], &rightEye = curr_eyes[eye2];
+				KeyPoint &left_eye = curr_eyes[eye1], &right_eye = curr_eyes[eye2];
 				if (curr_eyes[eye1].pt.x > curr_eyes[eye2].pt.x)
-					swap(leftEye,rightEye);
+					swap(left_eye,right_eye);
 
-				eyepair_rect_in = getEyePairRect(leftEye, rightEye);
+				eyepair_rect_in = getEyePairRect(left_eye, right_eye);
 				gpu::GpuMat eyepair = getEyePairImage(mat_frame2_gray,eyepair_rect_in);
 				int x = eyepair_rect_in.x;
 				int y = eyepair_rect_in.y;
@@ -322,7 +322,7 @@ int main(int argc, const char *argv[])
 
 					//DEBUG
 					char dist_str[256];
-					float dist_from_cam = getDistFromCamera(leftEye,rightEye);
+					float dist_from_cam = getDistFromCamera(left_eye,right_eye);
 					sprintf(
 						dist_str, 
 						"%.1fft away",
@@ -343,6 +343,21 @@ int main(int argc, const char *argv[])
 					);
 					putText(mat_frame2, eyepos_str, Point(x,y-40), FONT_HERSHEY_COMPLEX_SMALL,
 						1, CV_RGB(255,0,0), 1, CV_AA);
+
+					// Detect nose. TODO: Make this neater (put things in functions)
+					int nose_rect_size = right_eye.pt.x - left_eye.pt.x;
+					Rect candidate_region(left_eye.pt.x, left_eye.pt.y, nose_rect_size, nose_rect_size);
+					Mat mat_candidate_img = mat_frame2_gray(candidate_region);
+					gpu::GpuMat candidate_img(mat_candidate_img);
+					Rect nose_rect = haarNoseClassify(nose_cascade,candidate_img);
+					if (nose_rect.area() > 1) {
+						rectangle(
+							mat_frame2,
+							Point(nose_rect.x+candidate_region.x, nose_rect.y+candidate_region.y),
+							Point(nose_rect.width+candidate_region.x, nose_rect.height+candidate_region.y),
+							CV_RGB(255,245,238), 2
+						);
+					}
 				}
 			}
 		}
