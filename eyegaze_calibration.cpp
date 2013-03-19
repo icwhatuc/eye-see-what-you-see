@@ -240,8 +240,11 @@ int main(int argc, const char *argv[])
 			// SVM
 			//Rect eye_rect = haarEyeClassify(eye_cascade,candidate_img);
 			//bool haar_detected = eye_rect.area() > 1;
-			bool haar_detected = false; // DEBUG: don't use haar for eyes
+			//bool haar_detected = false; // DEBUG: don't use haar for eyes
 			bool svm_detected = svmEyeClassify(svm,mat_candidate_img);
+
+			Rect nose_rect = haarNoseClassify(nose_cascade,candidate_img);
+			bool haar_detected = nose_rect.area() > 1;
 
 			if (svm_detected) {
 				// Draw circle for SVM
@@ -266,6 +269,15 @@ int main(int argc, const char *argv[])
 				);
 			}
 			*/
+			if (haar_detected) { //DEBUG: nose
+				circle(
+					mat_frame2, 
+					Point(x+SVM_IMG_SIZE/2, y+SVM_IMG_SIZE/2), 
+					5, 
+					(curr_blob>=keypoints_size_orig) ? CV_RGB(0,0,0) : CV_RGB(50,50,50), 
+					3
+				);
+			}
 
 			if (svm_detected || haar_detected)
 				curr_eyes.push_back(keypoints[curr_blob]);
@@ -351,12 +363,27 @@ int main(int argc, const char *argv[])
 					gpu::GpuMat candidate_img(mat_candidate_img);
 					Rect nose_rect = haarNoseClassify(nose_cascade,candidate_img);
 					if (nose_rect.area() > 1) {
+					/*
 						rectangle(
 							mat_frame2,
 							Point(nose_rect.x+candidate_region.x, nose_rect.y+candidate_region.y),
 							Point(nose_rect.width+candidate_region.x, nose_rect.height+candidate_region.y),
 							CV_RGB(255,245,238), 2
 						);
+					*/
+						circle( // this code is a mess
+							mat_frame2, 
+							Point(nose_rect.width+candidate_region.x, nose_rect.height+candidate_region.y),
+							5, 
+							CV_RGB(0,0,0), 
+							3
+						);
+
+						//temporary stuff. TODO: remove
+						KeyPoint kp;
+						kp.pt.x = nose_rect.x+nose_rect.width/2+candidate_region.x;
+						kp.pt.y = nose_rect.y+nose_rect.height/2+candidate_region.y;
+						curr_eyes.push_back(kp);
 					}
 				}
 			}
