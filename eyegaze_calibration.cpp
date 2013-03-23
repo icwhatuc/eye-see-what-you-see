@@ -15,9 +15,9 @@
 #define CAM_WIDTH   1920
 #define CAM_HEIGHT  1080
 #define HIST_BINS   256
-#define HIST_THRESHOLD 0.001
+#define HIST_THRESHOLD 0.005
 
-#define MAX_BLOBS 40
+#define MAX_BLOBS 30
 #define REYE      0.0416667 // feet
 
 #define TV_WIDTH   (40/12) // ft
@@ -82,7 +82,7 @@ int main(int argc, const char *argv[])
 	svm.load(SVM_FILE);
 
 	// Haar
-	gpu::CascadeClassifier_GPU eye_cascade, eyepair_cascade, nose_cascade;
+	gpu::CascadeClassifier_GPU eye_cascade, eyepair_cascade;
 	if (!eye_cascade.load(HAAR_EYE_FILE)) {
 		fprintf(stderr, "ERROR: could not load Haar cascade xml for eyes\n");
 		return -1;
@@ -127,7 +127,7 @@ int main(int argc, const char *argv[])
 
 	// Move color image window to (0,0) and make fullscreen
 	moveWindow(W_COLOR,0,0);
-	setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
+	//setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
 
 	capture >> mat_frame2;
 	frame2.upload(mat_frame2);
@@ -289,6 +289,7 @@ int main(int argc, const char *argv[])
 				int x = eyepair_rect_in.x;
 				int y = eyepair_rect_in.y;
 				eyepair_rect_out = haarEyePairClassify(eyepair_cascade, eyepair);
+
 				// DEBUG: temporary thing to do gaze detection without needing to pair eyes
 				if(curr_eyes.size() == 2)
 				{
@@ -317,6 +318,7 @@ int main(int argc, const char *argv[])
 						);
 					}
 				}
+
 				if (eyepair_rect_out.area() > 1) { // Eyepair detected
 					// Draw rectangle around eyepair
 					rectangle(
@@ -342,31 +344,29 @@ int main(int argc, const char *argv[])
 					sprintf(
 						eyepos_str,
 						"(%.0f,%.0f) and (%.0f,%.0f)",
-						curr_eyes[eye1].pt.x,
-						curr_eyes[eye1].pt.y,
-						curr_eyes[eye2].pt.x,
-						curr_eyes[eye2].pt.y
+						left_eye.pt.x,
+						left_eye.pt.y,
+						right_eye.pt.x,
+						right_eye.pt.y
 					);
 					putText(mat_frame2, eyepos_str, Point(x,y-40), FONT_HERSHEY_COMPLEX_SMALL,
 						1, CV_RGB(255,0,0), 1, CV_AA);
 
-					// Place point for nose ---------------------------------------
+					// Place point for nose based on distance between eyes
 					Point2f nose(
 						(left_eye.pt.x + right_eye.pt.x)/2,
-						(left_eye.pt.y + right_eye.pt.y)/2 + 0.7*(right_eye.pt.x - left_eye.pt.x) // TODO: choose a better value
+						(left_eye.pt.y + right_eye.pt.y)/2 + 0.7*(right_eye.pt.x - left_eye.pt.x)
 					);
 
-					// First check if there is already an overlapping point.
+					// First check if there is already an overlapping nose point.
 					// If so, remove it.
 					vector<Point2f>::iterator it;
-					for (it = curr_noses.begin(); it != curr_noses.end();) {
+					for (it = curr_noses.begin(); it != curr_noses.end(); it++) {
 						if (pointsOverlap(*it, nose))
-							it = curr_noses.erase(it);
-						else 
-							it++;
+							break;
 					}
-					curr_noses.push_back(nose);
-					// ------------------------------------------------------------
+					if (it == curr_noses.end())
+						curr_noses.push_back(nose);
 				}
 			}
 		}
@@ -523,7 +523,7 @@ vector<Point2f> gazePoints(float d,
 	gazeShiftR.pt.x = delxRight/REYE*(REYE+d);
 	gazeShiftR.pt.y = delyRight/REYE*(REYE+d);
 
-	// take average of both eyes
+	// TODO: take average of both eyes
 	int scalingFactor = 1; //DEBUG: constant scaling factor
 	
 	Point2f gazeLocTemp;

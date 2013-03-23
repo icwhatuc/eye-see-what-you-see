@@ -162,6 +162,7 @@ bool predict_eyepair(Mat &img, Mat &coloredimg, Point &offset) {
 
 void displayEyePair(Mat &img, Mat &coloredimg, eyepair *ep)
 {
+	/*
 	int x = 0, y = 0, x1 = 0, y1 = 0;
 	static int paircounter = 0;
 	char filename[256];
@@ -210,7 +211,7 @@ void displayEyePair(Mat &img, Mat &coloredimg, eyepair *ep)
 			1, RED, 1, CV_AA);
 	}
 	paircounter++;
-}
+*/}
 
 int main(int argc, char *argv[])
 {
@@ -321,9 +322,9 @@ int main(int argc, char *argv[])
 		
 		currframe_mat = currframe;
 		currframe_matcopy = currframe_mat.clone();
-		
+		timing(true, "gray conv");
 		cvtColor(currframe_mat, currframe_gray, CV_BGR2GRAY );
-		
+		timing(false);
 		absdiff(currframe_gray, prevframe_gray, diff_copy);
 		
 		diff_img = diff_copy.clone();
@@ -342,7 +343,10 @@ int main(int argc, char *argv[])
 			if (histCount > histThreshold)
 				break;
 		}
+		timing(true, "thresh");
 		threshold(diff_copy,diff_img,bin,255,CV_THRESH_BINARY); // assumes 256 bins
+		timing(false);
+		/*
 		//timing(true,"gpu threshold");
 		//gpu::threshold(gpu_diff,gpu_thresh,bin,255,CV_THRESH_BINARY); // assumes 256 bins
 		//timing(false);
@@ -364,7 +368,7 @@ int main(int argc, char *argv[])
 		
 		/* clean regionsKnown */
 		//printf("cleaning the regionsKnown information from last frame...\n");
-		int j;
+		/*int j;
 		for(j = 0; j < regionsKnown.size(); j++)
 		{
 			regionsKnown[j] = false;
@@ -474,7 +478,7 @@ int main(int argc, char *argv[])
 		int numberofeyes = regionsKnown.size();
 		
 		/* pairing eyes */
-		for(int i1 = 0; i1 < numberofeyes-1; i1++)
+		/*for(int i1 = 0; i1 < numberofeyes-1; i1++)
 		{
 			for(int i2 = i1+1; i2 < numberofeyes; i2++)
 			{
@@ -486,7 +490,7 @@ int main(int argc, char *argv[])
 		}
 		
 		/* display eyepairs */
-		for(int i = 0; i < knownEyePairs.size(); i++)
+		/*for(int i = 0; i < knownEyePairs.size(); i++)
 		{
 			displayEyePair(currframe_gray, currframe_mat, &(knownEyePairs[i]));
 		}
@@ -521,7 +525,7 @@ int main(int argc, char *argv[])
 		{
 			wait_time = 1;
 		}
-
+		*/
 		int keyVal = cvWaitKey(1000) & 255;
 		
 		/*if(keypoints.size() > 20)
@@ -529,7 +533,6 @@ int main(int argc, char *argv[])
 
 		if ( (keyVal) == 27 )
 		{
-			if (DEBUGON) printf("time elapsed %f usecs. wait time = %d msecs\n", time_elapsed, wait_time);
 		}
 		else if ( (keyVal) == 'f' )
 		{
@@ -539,7 +542,7 @@ int main(int argc, char *argv[])
 		// DEBUG: temporary stuff
 		else if ( (keyVal) == 'n' ) 
 		{
-			while(int key = cvWaitKey(wait_time) & 255) {
+			while(int key = cvWaitKey(1000) & 255) {
 				if (key == 'n')
 					break;
 			}
