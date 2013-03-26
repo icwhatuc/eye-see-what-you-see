@@ -58,6 +58,8 @@
 #define ORANGE  (CV_RGB(255, 127, 0))
 
 #define mark(img, loc, col)	circle(img, loc, 5, col, 3)
+#define squared(x) ((x)*(x))
+#define offset(p1,x,y) p1.x += x, p1.y += y
 
 using namespace std;
 using namespace cv;
@@ -198,7 +200,9 @@ void initDisplayWindows()
 	namedWindow(W_DIFF, CV_WINDOW_NORMAL);
 	namedWindow(W_THRESH, CV_WINDOW_NORMAL);
 	namedWindow(W_COLOR, CV_WINDOW_NORMAL);
-	
+	namedWindow("g1", CV_WINDOW_NORMAL);
+	namedWindow("g2", CV_WINDOW_NORMAL);
+	namedWindow("localthresh", CV_WINDOW_NORMAL);
 	// Move color image window to (0,0) and make fullscreen
 	moveWindow(W_COLOR,0,0);
 	setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
@@ -233,6 +237,29 @@ void initComponents(eyedetectcomponents &edcs)
 	edcs.params.thresholdStep = 1;
 }
 
+// expects a binary thresholded image and looks at the locations of 255 intensities
+Point getCentroidLoc(Mat &img)
+{
+	int x, y, total_x = 0, total_y = 0, updatecount = 0;
+
+	for(x = 0; x < SVM_IMG_SIZE; x++)
+	{
+		for(y = 0; y < SVM_IMG_SIZE; y++)
+		{
+			if(img.at<unsigned char>(x,y))
+			{
+				total_x+=x;
+				total_y+=y;
+				updatecount++;
+			}
+		}
+	}
+
+	Point retval(updatecount?total_x/updatecount:SVM_IMG_SIZE/2, 
+		updatecount?total_y/updatecount:SVM_IMG_SIZE/2);
+	return retval;
+}
+
 // confirmKnownPairs carries out the typical method of taking frame difference
 // in local regions where eyes are known to update locations and blanks out the 
 // regions
@@ -244,8 +271,8 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 	for(pair = 0; pair < edcs.knownpairs.size(); pair++) {
 		for(eye = 0; eye < 2; eye++) {
 			//take local regions from gray1 and gray2
-			int x = edcs.knownpairs[pair].eyes[eye].x - SVM_IMG_SIZE/2-1;
-			int y = edcs.knownpairs[pair].eyes[eye].y - SVM_IMG_SIZE/2-1;
+			int x = edcs.knownpairs[pair].eyes[eye].x - SVM_IMG_SIZE/2;
+			int y = edcs.knownpairs[pair].eyes[eye].y - SVM_IMG_SIZE/2;
 			if (x < 0 || y < 0 || x + SVM_IMG_SIZE >= CAM_WIDTH || y + SVM_IMG_SIZE >= CAM_HEIGHT) {
 				edcs.knownpairs.erase(edcs.knownpairs.begin() + pair--);
 				break;
@@ -254,28 +281,83 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			Rect relevant_region(x, y, SVM_IMG_SIZE, SVM_IMG_SIZE);
 			
 			Mat grayregion1 = edcs.grayframe1_m(relevant_region), grayregion2 = edcs.grayframe2_m(relevant_region);
-			gpu::GpuMat pr_grayregion1_g(grayregion1), pr_grayregion2_g(grayregion2), diffimg_g, diffimgblurred_g;
-			
+			gpu::GpuMat pr_grayregion1_g(grayregion1), pr_grayregion2_g(grayregion2), diffimg_g, diffimgblurred_g, threshimg_g;
 			// get the difference image
 			gpu::absdiff(pr_grayregion1_g, pr_grayregion2_g, diffimg_g);
 			gpu::blur(diffimg_g, diffimgblurred_g, Size(3, 3), Point(-1,-1));
-	
+			gpu::threshold(diffimgblurred_g, threshimg_g, edcs.threshold*1/2, 255, CV_THRESH_BINARY);
+			
+			Mat threshimg_m;
+			threshimg_g.download(threshimg_m);
+			Point centroidLoc = getCentroidLoc(threshimg_m);
+			imshow("localthresh", threshimg_m);	
+			// DEBUG: test centroid location vs original point
+			offset(centroidLoc,x,y);
+			cout << "centroid:" << centroidLoc << endl;
+			cout << "original point: " << edcs.knownpairs[pair].eyes[eye] << endl;
+			cout << "-------------" << endl;
+
 			// take the brightest location in the new difference as the updated location of eye
 			Point confirmedEye;
 			
+			// DEBUG else confirm that it is an eye with svm
+			Rect regionToZeroOrig(x, y, SVM_IMG_SIZE, SVM_IMG_SIZE);
+			
+			Mat r2orig = edcs.grayframe2_m(regionToZeroOrig);
+			
+			char filename[256];	 //DEBUG
+		
 			gpu::minMaxLoc(diffimgblurred_g, 0, 0, 0, &confirmedEye);
 			
+
+
 			// trying blob detection
+			vector<KeyPoint> eyeCandidates;
+			Mat diffimg_m;
+			int loc;
+			float mindist=100000000, dist = 0;
+			Ptr<FeatureDetector> blob_detector = new SimpleBlobDetector(edcs.params);
+			blob_detector->create("SimpleBlob");
+			Mat diffimgblurred_m;
+			diffimgblurred_g.download(diffimgblurred_m); // Blob detect doesn't work on GpuMat objects
+			blob_detector->detect(diffimgblurred_m, eyeCandidates);
 
-			edcs.knownpairs[pair].eyes[eye].x = confirmedEye.x + x;
-			edcs.knownpairs[pair].eyes[eye].y = confirmedEye.y + y;
+			
+			for (int c = 0; c < eyeCandidates.size(); c++) 
+			{
+				dist = squared(eyeCandidates[c].pt.x - edcs.knownpairs[pair].eyes[eye].x + x) 
+					+ squared(eyeCandidates[c].pt.y - edcs.knownpairs[pair].eyes[eye].y + y);
+				if(dist < mindist)
+				{
+					mindist = dist;
+					loc = c;
+				}
+			}
+			
+			Point blobDet;
 
-			// DEBUG
+			if(eyeCandidates.size())
+			{
+				// DEBUG - only print out loc of 1 eye
+				if (eye==1)
+				{
+					blobDet.x = eyeCandidates[loc].pt.x + x;
+					blobDet.y = eyeCandidates[loc].pt.y + y;
+				}
+			}
+			
+			//edcs.knownpairs[pair].eyes[eye].x = confirmedEye.x + x;
+			//edcs.knownpairs[pair].eyes[eye].y = confirmedEye.y + y;
+			//edcs.knownpairs[pair].eyes[eye].x = centroidLoc.x + x;
+			//edcs.knownpairs[pair].eyes[eye].y = centroidLoc.y + y;
+			
+
+			// DEBUG - originally here!
 			mark(edcs.currColorFrame,edcs.knownpairs[pair].eyes[eye],GREEN);
 
-			x = edcs.knownpairs[pair].eyes[eye].x - SVM_IMG_SIZE/2-1;
-			y = edcs.knownpairs[pair].eyes[eye].y - SVM_IMG_SIZE/2-1;
-		
+			x = edcs.knownpairs[pair].eyes[eye].x - SVM_IMG_SIZE/2;
+			y = edcs.knownpairs[pair].eyes[eye].y - SVM_IMG_SIZE/2;
+			cout << edcs.knownpairs[pair].eyes[eye] << endl;	
 			// if the eye is now on the edge - stop tracking it
 			if(x < 0 || y < 0 || x + SVM_IMG_SIZE >= CAM_WIDTH || y + SVM_IMG_SIZE >= CAM_HEIGHT) {
 				edcs.knownpairs.erase(edcs.knownpairs.begin() + pair--);
@@ -288,7 +370,37 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			Mat r1 = edcs.grayframe1_m(regionToZero);
 			Mat r2 = edcs.grayframe2_m(regionToZero);
 			
+			imshow("g1", r1);
+			imshow("g2", r2);
+				
 			bool svm_detected = svmEyeClassify(edcs.svm, r2);
+	
+			static int count; // DEBUG for filename
+			count++;
+
+			if (eye == 1)
+			{
+				Mat r2blob = edcs.grayframe2_m(regionToZero);
+				// DEBUG: save images of candidates and minMaxLoc
+				//mark(r2, confirmedEye, 255);
+				line(r2,confirmedEye,confirmedEye,0,1);
+				line(r2blob,blobDet,blobDet,0,1);
+				{	    
+					sprintf(filename, "candidates/candidate%dB.jpg", count);
+					imwrite(filename, r2);
+				}
+				{	    
+					sprintf(filename, "candidates/candidate%dC.jpg", count);
+					imwrite(filename,r2blob);
+				}
+				{
+					Mat threshimg_m;
+					threshimg_g.download(threshimg_m);
+
+					sprintf(filename, "candidates/candidate%dthresh.jpg", count);
+					imwrite(filename, threshimg_m);
+				}
+			}
 
 			// Haar classifier check as well
 			gpu::GpuMat r2_g(r2);
@@ -358,10 +470,12 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	// Obtain difference image and blur
 	gpu::absdiff(grayframe2_g, grayframe1_g, diffimg_g);
 	gpu::blur(diffimg_g, blurreddiffimg_g, Size(3, 3), Point(-1,-1));
+	swap(diffimg_g, blurreddiffimg_g);
 
 	// Thresholding - find threshold based on histogram
 	unsigned char threshold = calcThreshold(blurreddiffimg_g);
-	
+	edcs.threshold = threshold;
+
 	// DEBUG: For display purposes only
 	gpu::threshold(diffimg_g, threshimg_g, threshold, 255, CV_THRESH_BINARY);
 	Mat threshimg_m;
