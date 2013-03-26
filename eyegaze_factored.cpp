@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <sys/time.h>
+#include <fstream>
 
 // opencv headers
 #include <cv.h> 
@@ -29,6 +30,9 @@
 // radius of eye
 #define REYE      0.0416667 // feet
 
+// Movement adjustment
+#define MOV_ADJ 87 // 87 px/ft
+
 // Histogram related constants
 #define HIST_BINS   		256
 #define HIST_THRESHOLD 		0.0001
@@ -51,6 +55,7 @@
 #define CYAN	(CV_RGB(0, 255, 255))
 #define BLACK	(CV_RGB(0, 0, 0))
 #define WHITE	(CV_RGB(255, 255, 255))
+#define ORANGE  (CV_RGB(255, 127, 0))
 
 #define mark(img, loc, col)	circle(img, loc, 5, col, 3)
 
@@ -71,6 +76,9 @@ float getDistFromCamera(Point &kp1, Point &kp2);
 void timing(bool start, string what="");
 void checkNoses(eyedetectcomponents &edcs);
 
+//DEBUG
+//ofstream yvd_data; // y vs distance data
+
 int main(int argc, char *argv[])
 {
 	// setup video capture
@@ -88,6 +96,15 @@ int main(int argc, char *argv[])
 
 	capture.set(CV_CAP_PROP_FRAME_WIDTH, CAM_WIDTH);
 	capture.set(CV_CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT);
+
+	// DEBUG ---------------------------------------------------
+	//yvd_data.open("yvd.log", ios::out | ios::app);
+
+	//if(!yvd_data.is_open()){
+		//cerr << "ERROR: Unable to open the log file to push data\n";
+		//return -1;
+	//}
+	// DEBUG ---------------------------------------------------
 
 	initDisplayWindows();
 	
@@ -130,7 +147,24 @@ int main(int argc, char *argv[])
 		circle(
 			edcs.currColorFrame, 
 			Point2f(CAM_WIDTH/2,CAM_HEIGHT/2), 
-			2, CV_RGB(255,255,255), 2
+			2, CV_RGB(120,120,120), 2
+		);
+		// Draw lines to separate screen into 10 regions
+		for (int c=0; c<5; c++) {
+			line(
+				edcs.currColorFrame, 
+				Point(CAM_WIDTH/5*c,0), 
+				Point(CAM_WIDTH/5*c,CAM_HEIGHT-1),
+				WHITE,
+				1
+			);
+		}
+		line(
+			edcs.currColorFrame, 
+			Point(0,CAM_HEIGHT/2), 
+			Point(CAM_WIDTH-1,CAM_HEIGHT/2), 
+			WHITE, 
+			1
 		);
 		
 		imshow(W_COLOR, edcs.currColorFrame);
@@ -138,11 +172,13 @@ int main(int argc, char *argv[])
 		// End of loop -- check for inputs
 		switch(waitKey(1)) {
 		case 27: // ESC
-		case 'x': 
+		case 'x': case 'q':
 			return 0;
 		case 'c':
 			if (edcs.knownpairs.size() == 1) {
 				cout << "calibrating..." << endl;
+				edcs.knownpairs[0].isCalibrated = true;
+				edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
 				edcs.knownpairs[0].calibrationPoints[0] = edcs.knownpairs[0].eyes[0];
 				edcs.knownpairs[0].calibrationPoints[1] = edcs.knownpairs[0].eyes[1];
 				edcs.knownpairs[0].calibrationPoints_orig[0] = edcs.knownpairs[0].eyes[0];
@@ -152,6 +188,8 @@ int main(int argc, char *argv[])
 			break;
 		}	
 	}
+
+	//yvd_data.close(); //DEBUG
 }
 
 void initDisplayWindows()
@@ -227,6 +265,8 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			
 			gpu::minMaxLoc(diffimgblurred_g, 0, 0, 0, &confirmedEye);
 			
+			// trying blob detection
+
 			edcs.knownpairs[pair].eyes[eye].x = confirmedEye.x + x;
 			edcs.knownpairs[pair].eyes[eye].y = confirmedEye.y + y;
 
@@ -248,9 +288,17 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			Mat r1 = edcs.grayframe1_m(regionToZero);
 			Mat r2 = edcs.grayframe2_m(regionToZero);
 			
-			if(!svmEyeClassify(edcs.svm, r2)) {
+			bool svm_detected = svmEyeClassify(edcs.svm, r2);
+
+			// Haar classifier check as well
+			gpu::GpuMat r2_g(r2);
+			Rect eye_rect = haarEyeClassify(edcs.eye_cascade, r2_g);
+			bool haar_detected = eye_rect.area() > 1;
+
+			if(!(svm_detected||haar_detected))
+			{
 				edcs.knownpairs.erase(edcs.knownpairs.begin() + pair--);
-				cout << "SVM CHECK FAILED!!!" << endl;
+				//cout << "NO LONGER AN EYE" << endl;
 				break;
 			}
 
@@ -260,8 +308,16 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 		
 			// mark on color image the new eye locations for display purposes
 			if(eye) {
-				mark(edcs.currColorFrame, edcs.knownpairs[pair].eyes[0], BLACK);
-				mark(edcs.currColorFrame, edcs.knownpairs[pair].eyes[1], BLACK);
+				if(haar_detected)
+				{
+					mark(edcs.currColorFrame, edcs.knownpairs[pair].eyes[0], YELLOW);
+					mark(edcs.currColorFrame, edcs.knownpairs[pair].eyes[1], YELLOW);
+				}
+				if(svm_detected)
+				{
+					mark(edcs.currColorFrame, edcs.knownpairs[pair].eyes[0], BLACK);
+					mark(edcs.currColorFrame, edcs.knownpairs[pair].eyes[1], BLACK);
+				}
 				mark(edcs.currColorFrame, edcs.knownpairs[pair].nose, PURPLE);
 			}
 		}
@@ -324,8 +380,8 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	
 	imshow(W_DIFF, diffimg_m);
 	// Iterate through currentCandidates and check using SVM and Haar cascades
-	int c;
-	for (c = 0; c < eyeCandidates.size(); c++) {
+	for (int c = 0; c < eyeCandidates.size(); c++) {
+
 		// Top left corner of candidate region
 		int x = eyeCandidates[c].pt.x - SVM_IMG_SIZE/2-1;
 		int y = eyeCandidates[c].pt.y - SVM_IMG_SIZE/2-1;
@@ -352,7 +408,7 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 		if (haar_detected)
 			mark(edcs.currColorFrame, eyeCandidates[c].pt, YELLOW);
 
-		if (svm_detected || haar_detected){
+		if (svm_detected || haar_detected) {
 			Point detectedEye(eyeCandidates[c].pt.x, eyeCandidates[c].pt.y);
 			detectedEyes.push_back(detectedEye);
 		}	
@@ -363,7 +419,7 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	for (int eye1 = 0; eye1 < detectedEyes.size(); eye1++) {
 		for (int eye2 = eye1+1; eye2 < detectedEyes.size(); eye2++) {
 			Rect eyepair_rect_in, eyepair_rect_out;
-			Point left_eye = detectedEyes[eye1], right_eye = detectedEyes[eye2];
+			Point &left_eye = detectedEyes[eye1], &right_eye = detectedEyes[eye2];
 			
 			if (detectedEyes[eye1].x > detectedEyes[eye2].x)
 				swap(left_eye,right_eye);
@@ -433,9 +489,17 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	{
 		// Calibration
 		vector<Point> gaze_loc;
+		//cout << edcs.knownpairs[pair].isCalibrated << endl;
 		if (edcs.knownpairs[pair].isCalibrated)
 		{
 			float dist_from_cam = getDistFromCamera(edcs.knownpairs[pair].eyes[0], edcs.knownpairs[pair].eyes[1]);
+			if(edcs.knownpairs[pair].distance!=dist_from_cam)
+			{
+				float diff_dist = edcs.knownpairs[pair].distance - dist_from_cam;
+				edcs.knownpairs[pair].calibrationPoints[0].y+=MOV_ADJ*diff_dist; // pixels/ft * ft =  pixels
+				edcs.knownpairs[pair].calibrationPoints[1].y+=MOV_ADJ*diff_dist;
+				edcs.knownpairs[pair].distance = dist_from_cam;
+			}
 			gaze_loc = gazePoints(
 				dist_from_cam,
 				edcs.knownpairs[pair].calibrationPoints[0],
@@ -443,9 +507,26 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 				edcs.knownpairs[pair].eyes[0],
 				edcs.knownpairs[pair].eyes[1]
 			);
-		}
 
-		mark(edcs.currColorFrame, gaze_loc[0], WHITE);
+			// testing - take average
+			edcs.knownpairs[pair].pointOfGaze = (gaze_loc[0] + gaze_loc[1])*.5;
+
+			//DEBUG----------------------------------------------------------
+			//static int count;
+			//static long sumOfY;
+			//count++;
+			//sumOfY += edcs.knownpairs[pair].eyes[0].y;
+			//edcs.knownpairs[pair].eyes[0].y = sumOfY/count;
+			//yvd_data << dist_from_cam << "\t" << edcs.knownpairs[pair].eyes[0].y <<
+				//"\t" << edcs.knownpairs[pair].eyes[1].y << endl;
+			//cout << "distance from cam: " << dist_from_cam << endl;
+			//cout << "eye (y): " << edcs.knownpairs[pair].eyes[0].y << endl;
+			//End of DEBUG---------------------------------------------------
+			
+			mark(edcs.currColorFrame, gaze_loc[0], CYAN);
+			mark(edcs.currColorFrame, gaze_loc[1], ORANGE);
+			//mark(edcs.currColorFrame, gaze_loc[0], CYAN);
+		}
 	}
 }
 
@@ -548,10 +629,31 @@ vector<Point> gazePoints(float d, Point &centerLocLeft, Point &centerLocRight, P
 	gazeLocTemp.x = (int)(-(gazeShiftL.x)/ftPerPx + CAM_WIDTH/2);
 	gazeLocTemp.y = (int)((gazeShiftL.y)/ftPerPx + CAM_HEIGHT/2);
 
+	int kyneg = 0, kypos = 0;
+	if((gazeShiftR.y)*TV_PX_PER_FT>0)
+	{
+		gazeLocTemp.y = (int)(kypos*(gazeShiftL.y)*TV_PX_PER_FT + CAM_HEIGHT/2);
+	}
+	else
+	{
+		gazeLocTemp.y = (int)(kyneg*(gazeShiftL.y)*TV_PX_PER_FT + CAM_HEIGHT/2);
+	}
+
 	gazeLoc.push_back(gazeLocTemp);
 
 	gazeLocTemp.x = (int)(-(gazeShiftR.x)*TV_PX_PER_FT + CAM_WIDTH/2);
 	gazeLocTemp.y = (int)((gazeShiftR.y)*TV_PX_PER_FT + CAM_HEIGHT/2);
+
+	
+	if((gazeShiftR.y)*TV_PX_PER_FT>0)
+	{
+		gazeLocTemp.y = (int)(kypos*(gazeShiftR.y)*TV_PX_PER_FT + CAM_HEIGHT/2);
+	}
+	else
+	{
+		gazeLocTemp.y = (int)(kyneg*(gazeShiftR.y)*TV_PX_PER_FT + CAM_HEIGHT/2);
+	}
+
 
 	gazeLoc.push_back(gazeLocTemp);
 
@@ -603,18 +705,21 @@ void checkNoses(eyedetectcomponents &edcs)
 			optflow_status, optflow_err
 		);
 	}
+	const float kx=0.95, ky=0.00; // Constants for calibration movement scaling
 	for(nose = 0; nose < edcs.knownpairs.size(); nose++)
 	{
-		edcs.knownpairs[nose].calibrationPoints[0].x = edcs.knownpairs[nose].calibrationPoints_orig[0].x + (currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
-		edcs.knownpairs[nose].calibrationPoints[0].y = edcs.knownpairs[nose].calibrationPoints_orig[0].y + (currNoses[nose].y - edcs.knownpairs[nose].nose_orig.y);
-		edcs.knownpairs[nose].calibrationPoints[1].x = edcs.knownpairs[nose].calibrationPoints_orig[1].x + (currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
-		edcs.knownpairs[nose].calibrationPoints[1].y = edcs.knownpairs[nose].calibrationPoints_orig[1].y + (currNoses[nose].y - edcs.knownpairs[nose].nose_orig.y);
+		edcs.knownpairs[nose].calibrationPoints[0].x = edcs.knownpairs[nose].calibrationPoints_orig[0].x + kx*(currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
+		edcs.knownpairs[nose].calibrationPoints[0].y = edcs.knownpairs[nose].calibrationPoints_orig[0].y + ky*(currNoses[nose].y - edcs.knownpairs[nose].nose_orig.y);
+		edcs.knownpairs[nose].calibrationPoints[1].x = edcs.knownpairs[nose].calibrationPoints_orig[1].x + kx*(currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
+		edcs.knownpairs[nose].calibrationPoints[1].y = edcs.knownpairs[nose].calibrationPoints_orig[1].y + ky*(currNoses[nose].y - edcs.knownpairs[nose].nose_orig.y);
 	
 		edcs.knownpairs[nose].nose = currNoses[nose];
 		mark(edcs.currColorFrame, edcs.knownpairs[nose].calibrationPoints[0], GREEN);
 		mark(edcs.currColorFrame, edcs.knownpairs[nose].calibrationPoints[1], GREEN);
 		
-		cout << edcs.knownpairs[nose].calibrationPoints[1] << endl;
-		cout << edcs.knownpairs[nose].calibrationPoints[0] << endl; 
+		//DEBUG
+		//cout << edcs.knownpairs[nose].calibrationPoints[1] << endl;
+		//cout << edcs.knownpairs[nose].calibrationPoints[0] << endl; 
 	}
 }
+
