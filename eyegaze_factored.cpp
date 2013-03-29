@@ -32,7 +32,7 @@
 #define REYE      0.0416667 // feet
 
 // Movement adjustment
-#define MOV_ADJ 87 // 87 px/ft <- changed to minimize jumps
+#define MOV_ADJ 40 // 87 px/ft <- changed to minimize jumps
 
 // Histogram related constants
 #define HIST_BINS   		256
@@ -61,7 +61,7 @@
 #define mark(img, loc, col)	circle(img, loc, 5, col, 3)
 #define squared(x) ((x)*(x))
 #define offset(p1,x,y) p1.x += x, p1.y += y
-#define round(x) ((int)((x)+0.5))
+#define round(x) ((int)((x)+0.5)) // Assumes positive
 
 using namespace std;
 using namespace cv;
@@ -112,15 +112,18 @@ int main(int argc, char *argv[])
 	{
 		//timing(true,"everything"); // DEBUG: test timing
 		gpu::GpuMat frame1_g, frame2_g, grayframe1_g, grayframe2_g;
+		gpu::GpuMat tmpframe_g;
 		
 		// capture 2 consecutive frames
 		capture >> edcs.currColorFrame;
 		frame1_g.upload(edcs.currColorFrame);
+		//gpu::flip(frame1_g,frame1_g,1);
 		gpu::cvtColor(frame1_g, grayframe1_g, CV_BGR2GRAY);
 		grayframe1_g.download(edcs.grayframe1_m);
 	
 		capture >> edcs.currColorFrame;
 		frame2_g.upload(edcs.currColorFrame);
+		//gpu::flip(frame2_g,frame2_g,1);
 		gpu::cvtColor(frame2_g, grayframe2_g, CV_BGR2GRAY);
 		grayframe2_g.download(edcs.grayframe2_m);
 	
@@ -178,10 +181,26 @@ int main(int argc, char *argv[])
 				edcs.knownpairs[0].calibrationPoints[1] = edcs.knownpairs[0].eyes[1];
 				edcs.knownpairs[0].calibrationPoints_orig[0] = edcs.knownpairs[0].eyes[0];
 				edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
+				edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
 				cout << "calibrated" << endl;
 			}
 			break;
 		}	
+
+		// DEBUG: don't have to press C at frame 90
+		if (framecount == 90 && edcs.knownpairs.size() == 1) {
+			cout << "calibrating..." << endl;
+			edcs.knownpairs[0].isCalibrated = true;
+			edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
+			edcs.knownpairs[0].calibrationPoints[0] = edcs.knownpairs[0].eyes[0];
+			edcs.knownpairs[0].calibrationPoints[1] = edcs.knownpairs[0].eyes[1];
+			edcs.knownpairs[0].calibrationPoints_orig[0] = edcs.knownpairs[0].eyes[0];
+			edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
+			edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
+			cout << "calibrated" << endl;
+		}
+		// END DEBUG-------------------------------
+
 		framecount += 2;
 		//timing(false); // DEBUG: test timing
 	}
@@ -551,13 +570,36 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 			);
 
 			// testing - take average
-			edcs.knownpairs[pair].pointOfGaze = (gaze_loc[0] + gaze_loc[1])*.5;
+			//edcs.knownpairs[pair].pointOfGaze = (gaze_loc[0] + gaze_loc[1])*.5;
+
+			//DEBUG: try lowpass----------------------
+			const float lowpassWeight= 0.6;
+			edcs.knownpairs[pair].pointOfGaze *= lowpassWeight;
+			edcs.knownpairs[pair].pointOfGaze += (gaze_loc[0] + gaze_loc[1])*.5*(1-lowpassWeight);
+			//END DEBUG-------------------------------
 			mark(edcs.currColorFrame, edcs.knownpairs[pair].pointOfGaze, CYAN);
 
 			//DEBUG----------------------------------------------------------
+			static int gazecount[4];
+			if (framecount > 100) {
+				if (edcs.knownpairs[pair].pointOfGaze.x < CAM_WIDTH/2 && edcs.knownpairs[pair].pointOfGaze.y < CAM_HEIGHT/2)
+					gazecount[0]++;
+				if (edcs.knownpairs[pair].pointOfGaze.x > CAM_WIDTH/2 && edcs.knownpairs[pair].pointOfGaze.y < CAM_HEIGHT/2)
+					gazecount[1]++;
+				if (edcs.knownpairs[pair].pointOfGaze.x < CAM_WIDTH/2 && edcs.knownpairs[pair].pointOfGaze.y > CAM_HEIGHT/2)
+					gazecount[2]++;
+				if (edcs.knownpairs[pair].pointOfGaze.x > CAM_WIDTH/2 && edcs.knownpairs[pair].pointOfGaze.y > CAM_HEIGHT/2)
+					gazecount[3]++;
+
+				cout << "frame " << framecount << " / " <<
+					gazecount[0] << " " << gazecount[1] << " " << gazecount[2] << " " << gazecount[3] << endl;	
+			}
+
+			/*
 			cout << "eye y: " << edcs.knownpairs[pair].eyes[0].y 
 			     << "/ calibrationpoint y: " << edcs.knownpairs[pair].calibrationPoints[0].y 
 			     << "/ gaze y: " << edcs.knownpairs[pair].pointOfGaze << endl;
+			 */
 			//static int count;
 			//static long sumOfY;
 			//count++;
@@ -674,8 +716,8 @@ vector<Point> gazePoints(float d, Point &centerLocLeft, Point &centerLocRight, P
 	gazeLocTemp.x = -gazeShiftL.x/ftPerPx + CAM_WIDTH/2;
 	gazeLocTemp.y = gazeShiftL.y/ftPerPx + CAM_HEIGHT/2;
 
-	const float kyneg = 0.5, kypos = 0.5;
-	if(gazeShiftR.y*TV_PX_PER_FT>0)
+	const float kyneg = 0.7, kypos = 0.7;
+	if(gazeShiftL.y>0)
 		gazeLocTemp.y = kypos*gazeShiftL.y*TV_PX_PER_FT + CAM_HEIGHT/2;
 	else
 		gazeLocTemp.y = kyneg*gazeShiftL.y*TV_PX_PER_FT + CAM_HEIGHT/2;
@@ -686,7 +728,7 @@ vector<Point> gazePoints(float d, Point &centerLocLeft, Point &centerLocRight, P
 	gazeLocTemp.x = -gazeShiftR.x*TV_PX_PER_FT + CAM_WIDTH/2;
 	gazeLocTemp.y = gazeShiftR.y*TV_PX_PER_FT + CAM_HEIGHT/2;
 	
-	if(gazeShiftR.y*TV_PX_PER_FT>0)
+	if(gazeShiftR.y>0)
 		gazeLocTemp.y = kypos*gazeShiftR.y*TV_PX_PER_FT + CAM_HEIGHT/2;
 	else
 		gazeLocTemp.y = kyneg*gazeShiftR.y*TV_PX_PER_FT + CAM_HEIGHT/2;
@@ -741,7 +783,7 @@ void checkNoses(eyedetectcomponents &edcs)
 			optflow_status, optflow_err
 		);
 	}
-	const float kx=1.0, ky=1.0; // Constants for calibration movement scaling
+	const float kx=1.0, ky=1; // Constants for calibration movement scaling
 	for(nose = 0; nose < edcs.knownpairs.size(); nose++)
 	{
 		edcs.knownpairs[nose].calibrationPoints[0].x = edcs.knownpairs[nose].calibrationPoints_orig[0].x + kx*(currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
