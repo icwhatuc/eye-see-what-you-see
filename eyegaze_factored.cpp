@@ -3,6 +3,7 @@
 #include <sys/time.h>
 #include <fstream>
 #include <cmath>
+#include <cstdlib>
 
 // opencv headers
 #include <cv.h> 
@@ -80,7 +81,8 @@ float getDistFromCamera(Point &kp1, Point &kp2);
 void timing(bool start, string what="");
 void checkNoses(eyedetectcomponents &edcs);
 
-int framecount, eyecount;
+int framecount;
+bool paused = false;
 
 int main(int argc, char *argv[])
 {
@@ -110,18 +112,19 @@ int main(int argc, char *argv[])
 
 	while(1)
 	{
-		//timing(true,"everything"); // DEBUG: test timing
 		gpu::GpuMat frame1_g, frame2_g, grayframe1_g, grayframe2_g;
 		gpu::GpuMat tmpframe_g;
 		
 		// capture 2 consecutive frames
 		capture >> edcs.currColorFrame;
+		flip(edcs.currColorFrame, edcs.currColorFrame, 1);
 		frame1_g.upload(edcs.currColorFrame);
 		//gpu::flip(frame1_g,frame1_g,1);
 		gpu::cvtColor(frame1_g, grayframe1_g, CV_BGR2GRAY);
 		grayframe1_g.download(edcs.grayframe1_m);
 	
 		capture >> edcs.currColorFrame;
+		flip(edcs.currColorFrame, edcs.currColorFrame, 1);
 		frame2_g.upload(edcs.currColorFrame);
 		//gpu::flip(frame2_g,frame2_g,1);
 		gpu::cvtColor(frame2_g, grayframe2_g, CV_BGR2GRAY);
@@ -141,13 +144,31 @@ int main(int argc, char *argv[])
 		lookForNewEyes(edcs);
 
 		// Show images
-		// DEBUG: show center of screen
+		// DEBUG: show center of screen ---------------------
 		circle(
 			edcs.currColorFrame, 
 			Point2f(CAM_WIDTH/2,CAM_HEIGHT/2), 
 			2, CV_RGB(120,120,120), 2
 		);
 		// Draw lines to separate screen into 10 regions
+		line(
+			edcs.currColorFrame,
+			Point(CAM_WIDTH/2,0),
+			Point(CAM_WIDTH/2,CAM_HEIGHT-1),
+			WHITE,
+			1
+		);
+		line(
+			edcs.currColorFrame,
+			Point(0,CAM_HEIGHT/2),
+			Point(CAM_WIDTH-1,CAM_HEIGHT/2),
+			WHITE,
+			1
+		);
+		// END DEBUG----------------------------------------
+
+		// DEBUG: split into 10 regions --------------------
+		/*
 		for (int c=0; c<5; c++) {
 			line(
 				edcs.currColorFrame, 
@@ -164,7 +185,18 @@ int main(int argc, char *argv[])
 			WHITE, 
 			1
 		);
-		
+		*/
+		// END DEBUG----------------------------------------
+
+		// DEBUG: draw random point-------------------------
+		/*
+		static Point randomPoint;
+		if (framecount%100 == 0) 
+			randomPoint = Point(rand()%CAM_WIDTH, rand()%CAM_HEIGHT);
+		circle(edcs.currColorFrame, randomPoint, 10, ORANGE, 5);
+		*/
+		// END DEBUG----------------------------------------
+
 		imshow(W_COLOR, edcs.currColorFrame);
 		
 		// End of loop -- check for inputs
@@ -174,7 +206,6 @@ int main(int argc, char *argv[])
 			return 0;
 		case 'c':
 			if (edcs.knownpairs.size() == 1) {
-				cout << "calibrating..." << endl;
 				edcs.knownpairs[0].isCalibrated = true;
 				edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
 				edcs.knownpairs[0].calibrationPoints[0] = edcs.knownpairs[0].eyes[0];
@@ -182,30 +213,12 @@ int main(int argc, char *argv[])
 				edcs.knownpairs[0].calibrationPoints_orig[0] = edcs.knownpairs[0].eyes[0];
 				edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
 				edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
-				cout << "calibrated" << endl;
 			}
 			break;
 		}	
 
-		// DEBUG: don't have to press C at frame 90
-		if (framecount == 90 && edcs.knownpairs.size() == 1) {
-			cout << "calibrating..." << endl;
-			edcs.knownpairs[0].isCalibrated = true;
-			edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
-			edcs.knownpairs[0].calibrationPoints[0] = edcs.knownpairs[0].eyes[0];
-			edcs.knownpairs[0].calibrationPoints[1] = edcs.knownpairs[0].eyes[1];
-			edcs.knownpairs[0].calibrationPoints_orig[0] = edcs.knownpairs[0].eyes[0];
-			edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
-			edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
-			cout << "calibrated" << endl;
-		}
-		// END DEBUG-------------------------------
-
 		framecount += 2;
-		//timing(false); // DEBUG: test timing
 	}
-
-	//yvd_data.close(); //DEBUG
 }
 
 void initDisplayWindows()
@@ -323,7 +336,7 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 
 			x = edcs.knownpairs[pair].eyes[eye].x - SVM_IMG_SIZE/2;
 			y = edcs.knownpairs[pair].eyes[eye].y - SVM_IMG_SIZE/2;
-			//cout << edcs.knownpairs[pair].eyes[eye] << endl;	
+
 			// if the eye is now on the edge - stop tracking it
 			if(x < 0 || y < 0 || x + SVM_IMG_SIZE >= CAM_WIDTH || y + SVM_IMG_SIZE >= CAM_HEIGHT) {
 				edcs.knownpairs.erase(edcs.knownpairs.begin() + pair--);
@@ -351,11 +364,6 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 				edcs.knownpairs.erase(edcs.knownpairs.begin() + pair--);
 				break;
 			}
-
-			// DEBUG: count total number of eyes detected -------------------
-			//eyecount++; 
-			//cout << "frame: " << framecount << " eyes: " << eyecount << endl;
-			// END OF DEBUG--------------------------------------------------
 
 			// blank out the regions if classifier confirms it is an eye
 			r1 = Mat::zeros(SVM_IMG_SIZE, SVM_IMG_SIZE, CV_8UC1);
@@ -468,11 +476,6 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 		if (svm_detected || haar_detected) {
 			Point detectedEye(eyeCandidates[c].pt.x, eyeCandidates[c].pt.y);
 			detectedEyes.push_back(detectedEye);
-
-			// DEBUG: count total number of eyes detected -------------------
-			//eyecount++; 
-			//cout << "frame: " << framecount << " eyes: " << eyecount << endl;
-			// END OF DEBUG--------------------------------------------------
 		}	
 	}
 
@@ -551,7 +554,6 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	{
 		// Calibration
 		vector<Point> gaze_loc;
-		//cout << edcs.knownpairs[pair].isCalibrated << endl;
 		if (edcs.knownpairs[pair].isCalibrated)
 		{
 			// If person moves backward or forward
@@ -579,7 +581,8 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 			//END DEBUG-------------------------------
 			mark(edcs.currColorFrame, edcs.knownpairs[pair].pointOfGaze, CYAN);
 
-			//DEBUG----------------------------------------------------------
+			//DEBUG: count gazes in region ----------------------------------
+			/*
 			static int gazecount[4];
 			if (framecount > 100) {
 				if (edcs.knownpairs[pair].pointOfGaze.x < CAM_WIDTH/2 && edcs.knownpairs[pair].pointOfGaze.y < CAM_HEIGHT/2)
@@ -594,25 +597,8 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 				cout << "frame " << framecount << " / " <<
 					gazecount[0] << " " << gazecount[1] << " " << gazecount[2] << " " << gazecount[3] << endl;	
 			}
-
-			/*
-			cout << "eye y: " << edcs.knownpairs[pair].eyes[0].y 
-			     << "/ calibrationpoint y: " << edcs.knownpairs[pair].calibrationPoints[0].y 
-			     << "/ gaze y: " << edcs.knownpairs[pair].pointOfGaze << endl;
-			 */
-			//static int count;
-			//static long sumOfY;
-			//count++;
-			//sumOfY += edcs.knownpairs[pair].eyes[0].y;
-			//edcs.knownpairs[pair].eyes[0].y = sumOfY/count;
-			//yvd_data << dist_from_cam << "\t" << edcs.knownpairs[pair].eyes[0].y <<
-				//"\t" << edcs.knownpairs[pair].eyes[1].y << endl;
-			//cout << "distance from cam: " << dist_from_cam << endl;
-			//cout << "eye (y): " << edcs.knownpairs[pair].eyes[0].y << endl;
-			//End of DEBUG---------------------------------------------------
-			
-			//mark(edcs.currColorFrame, gaze_loc[0], CYAN);
-			//mark(edcs.currColorFrame, gaze_loc[1], ORANGE);
+			*/
+			//END DEBUG------------------------------------------------------
 		}
 	}
 }
@@ -713,7 +699,7 @@ vector<Point> gazePoints(float d, Point &centerLocLeft, Point &centerLocRight, P
 	// take average of both eyes
 	Point gazeLocTemp;
 
-	gazeLocTemp.x = -gazeShiftL.x/ftPerPx + CAM_WIDTH/2;
+	gazeLocTemp.x = gazeShiftL.x/ftPerPx + CAM_WIDTH/2;
 	gazeLocTemp.y = gazeShiftL.y/ftPerPx + CAM_HEIGHT/2;
 
 	const float kyneg = 0.7, kypos = 0.7;
@@ -725,7 +711,7 @@ vector<Point> gazePoints(float d, Point &centerLocLeft, Point &centerLocRight, P
 	gazeLoc.push_back(gazeLocTemp);
 
 
-	gazeLocTemp.x = -gazeShiftR.x*TV_PX_PER_FT + CAM_WIDTH/2;
+	gazeLocTemp.x = gazeShiftR.x*TV_PX_PER_FT + CAM_WIDTH/2;
 	gazeLocTemp.y = gazeShiftR.y*TV_PX_PER_FT + CAM_HEIGHT/2;
 	
 	if(gazeShiftR.y>0)
@@ -783,7 +769,7 @@ void checkNoses(eyedetectcomponents &edcs)
 			optflow_status, optflow_err
 		);
 	}
-	const float kx=1.0, ky=1; // Constants for calibration movement scaling
+	const float kx=0.0, ky=.5; // Constants for calibration movement scaling
 	for(nose = 0; nose < edcs.knownpairs.size(); nose++)
 	{
 		edcs.knownpairs[nose].calibrationPoints[0].x = edcs.knownpairs[nose].calibrationPoints_orig[0].x + kx*(currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
@@ -794,10 +780,6 @@ void checkNoses(eyedetectcomponents &edcs)
 		edcs.knownpairs[nose].nose = currNoses[nose];
 		mark(edcs.currColorFrame, edcs.knownpairs[nose].calibrationPoints[0], GREEN);
 		mark(edcs.currColorFrame, edcs.knownpairs[nose].calibrationPoints[1], GREEN);
-		
-		//DEBUG
-		//cout << edcs.knownpairs[nose].calibrationPoints[1] << endl;
-		//cout << edcs.knownpairs[nose].calibrationPoints[0] << endl; 
 	}
 }
 
