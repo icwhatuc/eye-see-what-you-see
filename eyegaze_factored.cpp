@@ -217,6 +217,18 @@ int main(int argc, char *argv[])
 			break;
 		}	
 
+		// DEBUG: don't have to press C at frame 90
+		if (framecount == 40 && edcs.knownpairs.size() == 1) {
+			edcs.knownpairs[0].isCalibrated = true;
+			edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
+			edcs.knownpairs[0].calibrationPoints[0] = edcs.knownpairs[0].eyes[0];
+			edcs.knownpairs[0].calibrationPoints[1] = edcs.knownpairs[0].eyes[1];
+			edcs.knownpairs[0].calibrationPoints_orig[0] = edcs.knownpairs[0].eyes[0];
+			edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
+			edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
+		}
+		// END DEBUG-------------------------------
+
 		framecount += 2;
 	}
 }
@@ -224,13 +236,13 @@ int main(int argc, char *argv[])
 void initDisplayWindows()
 {
 	// Display windows
-	namedWindow(W_DIFF, CV_WINDOW_NORMAL);
-	namedWindow(W_THRESH, CV_WINDOW_NORMAL);
+	//namedWindow(W_DIFF, CV_WINDOW_NORMAL);
+	//namedWindow(W_THRESH, CV_WINDOW_NORMAL);
 	namedWindow(W_COLOR, CV_WINDOW_NORMAL);
-	namedWindow("g1", CV_WINDOW_NORMAL);
-	namedWindow("g2", CV_WINDOW_NORMAL);
-	namedWindow("local thresh", CV_WINDOW_NORMAL);
-	namedWindow("local diff", CV_WINDOW_NORMAL);
+	//namedWindow("g1", CV_WINDOW_NORMAL);
+	//namedWindow("g2", CV_WINDOW_NORMAL);
+	//namedWindow("local thresh", CV_WINDOW_NORMAL);
+	//namedWindow("local diff", CV_WINDOW_NORMAL);
 	// Move color image window to (0,0) and make fullscreen
 	moveWindow(W_COLOR,0,0);
 	setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
@@ -327,8 +339,8 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			
 			Mat diffimgblurred_m;
 			diffimgblurred_g.download(diffimgblurred_m);
-			imshow("local diff", diffimgblurred_m);
-			imshow("local thresh", threshimg_m);	
+			//imshow("local diff", diffimgblurred_m);
+			//imshow("local thresh", threshimg_m);	
 			offset(centroidLoc,x,y);
 
 			// update edcs.knownpairs etc.
@@ -349,8 +361,8 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			Mat r1 = edcs.grayframe1_m(regionToZero);
 			Mat r2 = edcs.grayframe2_m(regionToZero);
 			
-			imshow("g1", r1);
-			imshow("g2", r2);
+			//imshow("g1", r1);
+			//imshow("g2", r2);
 				
 			bool svm_detected = svmEyeClassify(edcs.svm, r2);
 	
@@ -432,7 +444,7 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	Mat threshimg_m;
 	threshimg_g.download(threshimg_m);
 
-	imshow(W_THRESH, threshimg_m);
+	//imshow(W_THRESH, threshimg_m);
 	
 	// detect possible eye candidates based on thresholded image (done within 
 	// detection) and return as currentCandidates
@@ -443,7 +455,7 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 	diffimg_g.download(diffimg_m); // Blob detect doesn't work on GpuMat objects
 	blob_detector->detect(diffimg_m, eyeCandidates);
 	
-	imshow(W_DIFF, diffimg_m);
+	//imshow(W_DIFF, diffimg_m);
 	// Iterate through currentCandidates and check using SVM and Haar cascades
 	for (int c = 0; c < eyeCandidates.size(); c++) {
 
@@ -581,6 +593,9 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 			//END DEBUG-------------------------------
 			mark(edcs.currColorFrame, edcs.knownpairs[pair].pointOfGaze, CYAN);
 
+			cout << edcs.knownpairs[pair].pointOfGaze.x << " ";
+			cout << edcs.knownpairs[pair].pointOfGaze.y << " ";
+
 			//DEBUG: count gazes in region ----------------------------------
 			/*
 			static int gazecount[4];
@@ -600,6 +615,7 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 			*/
 			//END DEBUG------------------------------------------------------
 		}
+		cout << endl;
 	}
 }
 
