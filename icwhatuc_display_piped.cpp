@@ -30,12 +30,16 @@
 
 #define RADIUSOFGAZE	70
 
-#define UPDATETHRESHOLD	10
+#define UPDATETHRESHOLD	50
+
+using namespace std;
 
 void initWindows()
 {
-	cvNamedWindow(HEATMAP_WIN, WINDOW_PROPS);
-	cvNamedWindow(DISPLAY_WIN, WINDOW_PROPS);
+	cv::namedWindow(HEATMAP_WIN, WINDOW_PROPS);
+	cv::namedWindow(DISPLAY_WIN, WINDOW_PROPS);
+	cv::moveWindow(DISPLAY_WIN,0,0);
+	cv::setWindowProperty(DISPLAY_WIN, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
 }
 
 void loadImages(char *path, std::vector<cv::gpu::GpuMat> &imagelist)
@@ -253,7 +257,7 @@ int main(int argc, char *argv[])
 	while(!std::cin.eof())
 	{			
 		cv::imshow(DISPLAY_WIN, mycollage);
-		
+
 		if(switchPoster)
 		{
 			cv::Mat imageOfInterest;
@@ -309,14 +313,17 @@ int main(int argc, char *argv[])
 			break;
 		}
 
-		emptyPosterHits();
-		heatmap_g.upload(emptyheatmap);
 		std::getline(std::cin, line);
 		std::istringstream iss(line);
 		int x, y;
 		while (iss >> x, iss >> y) {
 			points.push_back(cv::Point(x,y));
 			pointInput = 1;
+			if(++posterhits[y*DISPLAYROWS/DISPLAYHEIGHT][x*DISPLAYCOLS/DISPLAYWIDTH] > UPDATETHRESHOLD)
+				switchPoster = 1;
+		
+			desiredPosterRow = y*DISPLAYROWS/DISPLAYHEIGHT;
+			desiredPosterCol = x*DISPLAYCOLS/DISPLAYWIDTH;
 		}
 	}
 }

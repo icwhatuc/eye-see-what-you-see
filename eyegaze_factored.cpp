@@ -60,6 +60,7 @@
 #define ORANGE  (CV_RGB(255, 127, 0))
 
 #define mark(img, loc, col)	circle(img, loc, 5, col, 3)
+#define smallmark(img, loc, col) circle(img, loc, 2, col, 2)
 #define squared(x) ((x)*(x))
 #define offset(p1,x,y) p1.x += x, p1.y += y
 #define round(x) ((int)((x)+0.5)) // Assumes positive
@@ -205,6 +206,18 @@ int main(int argc, char *argv[])
 		case 'x': case 'q':
 			return 0;
 		case 'c':
+			for (int i=0; i<edcs.knownpairs.size(); i++)
+			{
+				edcs.knownpairs[i].isCalibrated=true;
+				edcs.knownpairs[i].nose_orig = edcs.knownpairs[i].nose;
+				edcs.knownpairs[i].calibrationPoints[0] = edcs.knownpairs[i].eyes[0];
+				edcs.knownpairs[i].calibrationPoints[1] = edcs.knownpairs[i].eyes[1];
+				edcs.knownpairs[i].calibrationPoints_orig[0] = edcs.knownpairs[i].eyes[0];
+				edcs.knownpairs[i].calibrationPoints_orig[1] = edcs.knownpairs[i].eyes[1];
+				edcs.knownpairs[i].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
+				cout << "eye calibrated for: " << edcs.knownpairs[i].calibrationPoints << endl;
+			}
+			/*
 			if (edcs.knownpairs.size() == 1) {
 				edcs.knownpairs[0].isCalibrated = true;
 				edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
@@ -214,10 +227,12 @@ int main(int argc, char *argv[])
 				edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
 				edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
 			}
+			*/
 			break;
 		}	
 
 		// DEBUG: don't have to press C at frame 90
+		/*
 		if (framecount == 40 && edcs.knownpairs.size() == 1) {
 			edcs.knownpairs[0].isCalibrated = true;
 			edcs.knownpairs[0].nose_orig = edcs.knownpairs[0].nose;
@@ -227,6 +242,7 @@ int main(int argc, char *argv[])
 			edcs.knownpairs[0].calibrationPoints_orig[1] = edcs.knownpairs[0].eyes[1];
 			edcs.knownpairs[0].pointOfGaze = Point(CAM_WIDTH/2,CAM_HEIGHT/2);
 		}
+		*/
 		// END DEBUG-------------------------------
 
 		framecount += 2;
@@ -243,9 +259,10 @@ void initDisplayWindows()
 	//namedWindow("g2", CV_WINDOW_NORMAL);
 	//namedWindow("local thresh", CV_WINDOW_NORMAL);
 	//namedWindow("local diff", CV_WINDOW_NORMAL);
+
 	// Move color image window to (0,0) and make fullscreen
-	moveWindow(W_COLOR,0,0);
-	setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
+	//moveWindow(W_COLOR,0,0);
+	//setWindowProperty(W_COLOR, CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
 }
 
 void initComponents(eyedetectcomponents &edcs)
@@ -328,7 +345,50 @@ void checkKnownPairs(eyedetectcomponents &edcs)
 			gpu::absdiff(pr_grayregion1_g, pr_grayregion2_g, diffimg_g);
 			gpu::blur(diffimg_g, diffimgblurred_g, Size(3, 3), Point(-1,-1));
 			gpu::threshold(diffimgblurred_g, threshimg_g, edcs.threshold*3/4, 255, CV_THRESH_BINARY);
+		
+			// Eye corner stuff -----------------------------------------------
+			/*
+			Scalar gray1sum, gray2sum;
+			gray1sum = sum(grayregion1);
+			gray2sum = sum(grayregion2);
+
+			imshow("dark", gray2sum[0] > gray1sum[0] ? grayregion2: grayregion1);
+			imshow("bright", gray2sum[0] > gray1sum[0] ? grayregion1: grayregion2);
 			
+			Mat darkimg = gray2sum[0] > gray1sum[0] ? grayregion2: grayregion1;
+			Mat brightimg = gray2sum[0] > gray1sum[0] ? grayregion1: grayregion2;
+
+			vector<Point> corners;
+			goodFeaturesToTrack(darkimg, corners, 100, 0.05, 10);
+			Point leftcorner, rightcorner;
+			int corner, minx = SVM_IMG_SIZE/4*3, maxx = SVM_IMG_SIZE/5;
+			for(corner = 0; corner < corners.size(); corner++) {
+				if(corners[corner].y > SVM_IMG_SIZE/2 && corners[corner].y < SVM_IMG_SIZE*2/3)
+				{
+					if(corners[corner].x < minx)
+						leftcorner = corners[corner], minx = corners[corner].x;
+					else if(corners[corner].x > maxx)
+						rightcorner = corners[corner], maxx = corners[corner].x;
+				}
+			}
+			Mat regioncpy = edcs.currColorFrame(relevant_region), region_hsv;
+			regioncpy = regioncpy.clone();	
+			smallmark(grayregion2, leftcorner, 0);
+			smallmark(grayregion2, rightcorner, 0);
+		
+			cvtColor(regioncpy, region_hsv, CV_BGR2HSV);
+			vector<Mat> hsvsplit;
+			split(region_hsv, hsvsplit);
+			medianBlur(hsvsplit[1], hsvsplit[1], 3);	
+			imshow("eyecorners_hsv", hsvsplit[1]);
+			imshow("eyecorners", grayregion2);
+			static int count;
+			char filename[256];
+			sprintf(filename, "localimgs/corner%d.jpg", count++);
+			imwrite(filename, grayregion2);
+			*/
+			// End of eye corner stuff ---------------------------------------
+
 			Mat threshimg_m;
 			threshimg_g.download(threshimg_m);
 			Point centroidLoc = getCentroidLoc(threshimg_m);
@@ -529,6 +589,7 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 				currenteyepair.eyes[1] = detectedEyes[eye2];
 				currenteyepair.nose = nose;
 				currenteyepair.nose_orig = nose;
+				currenteyepair.isCalibrated = false;
 
 				edcs.knownpairs.push_back(currenteyepair);
 
@@ -590,11 +651,24 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 			const float lowpassWeight= 0.6;
 			edcs.knownpairs[pair].pointOfGaze *= lowpassWeight;
 			edcs.knownpairs[pair].pointOfGaze += (gaze_loc[0] + gaze_loc[1])*.5*(1-lowpassWeight);
+
+			if(edcs.knownpairs[pair].pointOfGaze.x>CAM_WIDTH)
+				edcs.knownpairs[pair].pointOfGaze.x = CAM_WIDTH;
+			
+			if(edcs.knownpairs[pair].pointOfGaze.y>CAM_HEIGHT)
+				edcs.knownpairs[pair].pointOfGaze.y = CAM_HEIGHT;
+
+			if(edcs.knownpairs[pair].pointOfGaze.x<0)
+				edcs.knownpairs[pair].pointOfGaze.x = 0;
+
+			if(edcs.knownpairs[pair].pointOfGaze.y<0)
+				edcs.knownpairs[pair].pointOfGaze.y = 0;
+
 			//END DEBUG-------------------------------
 			mark(edcs.currColorFrame, edcs.knownpairs[pair].pointOfGaze, CYAN);
 
-			cout << edcs.knownpairs[pair].pointOfGaze.x << " ";
-			cout << edcs.knownpairs[pair].pointOfGaze.y << " ";
+			cout << (int) edcs.knownpairs[pair].pointOfGaze.x << " ";
+			cout << (int) edcs.knownpairs[pair].pointOfGaze.y << endl;
 
 			//DEBUG: count gazes in region ----------------------------------
 			/*
@@ -615,7 +689,6 @@ void lookForNewEyes(eyedetectcomponents &edcs)
 			*/
 			//END DEBUG------------------------------------------------------
 		}
-		cout << endl;
 	}
 }
 
@@ -785,7 +858,7 @@ void checkNoses(eyedetectcomponents &edcs)
 			optflow_status, optflow_err
 		);
 	}
-	const float kx=0.0, ky=.5; // Constants for calibration movement scaling
+	const float kx=1.0, ky=1.0; // original 1,1 // Constants for calibration movement scaling
 	for(nose = 0; nose < edcs.knownpairs.size(); nose++)
 	{
 		edcs.knownpairs[nose].calibrationPoints[0].x = edcs.knownpairs[nose].calibrationPoints_orig[0].x + kx*(currNoses[nose].x - edcs.knownpairs[nose].nose_orig.x);
